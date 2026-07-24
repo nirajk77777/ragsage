@@ -32,12 +32,16 @@ TokenCounter = Callable[[str], int]
 _DEFAULT_ENCODING = "cl100k_base"
 
 # Heading levels the structural pass splits on, deepest last so the metadata dict
-# keeps its H1 > H2 > H3 order.
+# keeps its H1 > H2 > … order. All six ATX levels split, so a format that emits
+# deep headings (HTML/DOCX carry the full <h1>…<h6> hierarchy) has every level's
+# context reach chunk metadata rather than being swallowed into its parent section.
 _HEADERS_TO_SPLIT_ON = [
     ("#", "h1"),
     ("##", "h2"),
     ("###", "h3"),
     ("####", "h4"),
+    ("#####", "h5"),
+    ("######", "h6"),
 ]
 _HEADER_KEYS = [key for _, key in _HEADERS_TO_SPLIT_ON]
 

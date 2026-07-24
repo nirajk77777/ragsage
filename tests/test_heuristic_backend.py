@@ -244,6 +244,24 @@ def test_oversized_prose_is_token_bounded() -> None:
     assert max(count(c.text) for c in chunks) < count(long_body)
 
 
+def test_deep_h5_h6_headings_reach_chunk_metadata() -> None:
+    # HTML and DOCX carry the full <h1>…<h6> hierarchy, so the structural pass
+    # must split on all six levels — a deep h5/h6 section's heading context must
+    # reach metadata rather than being swallowed into its parent section.
+    count = make_token_counter()
+    doc = (
+        "# Top\n\nintro\n\n"
+        "##### Deep Five\n\nfive body\n\n"
+        "###### Deeper Six\n\nsix body\n"
+    )
+    chunks = chunk_markdown(
+        doc, document_id="deadbeefdeadbeef", page=1, size=512, overlap=64, count_tokens=count
+    )
+    paths = {tuple(c.metadata.get("headings", ())) for c in chunks}
+    assert ("Top", "Deep Five") in paths
+    assert ("Top", "Deep Five", "Deeper Six") in paths
+
+
 def test_token_counting_needs_no_transformers() -> None:
     # The pinned tokenizer is tiktoken; the heavy transformers/torch stack must
     # never be dragged in just to count tokens.

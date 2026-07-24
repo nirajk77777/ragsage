@@ -149,8 +149,12 @@ def _pipe_row(cells: list[str], width: int) -> str:
 
 
 def _cell_text(text: str) -> str:
-    """A table cell flattened to a single line so it can't break the pipe grid."""
-    return " ".join(_clean(text).split())
+    """A table cell flattened to a single line so it can't break the pipe grid.
+
+    A literal ``|`` is escaped so a pipe inside cell text can't be read as a
+    column separator, matching how the other format paths serialise cells.
+    """
+    return " ".join(_clean(text).split()).replace("|", "\\|")
 
 
 def _clean(text: str) -> str:
