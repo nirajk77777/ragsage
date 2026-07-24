@@ -77,6 +77,7 @@ def chunk_markdown(
     size: int,
     overlap: int,
     count_tokens: TokenCounter,
+    start_ordinal: int = 0,
 ) -> list[Chunk]:
     """Split ``markdown`` into token-bounded chunks, section by section.
 
@@ -84,9 +85,14 @@ def chunk_markdown(
     only when a single prose block overflows and must be recursively split. Each
     returned chunk records ``page`` as its source page and, when the section sat
     under one or more headings, ``metadata["headings"]`` as that heading path.
+
+    ``start_ordinal`` is the ordinal (and id suffix) the first emitted chunk takes,
+    so a multi-page parser can chunk page by page yet keep one dense, ordered
+    ordinal sequence across the whole document — page 2's chunks continue where
+    page 1's left off rather than colliding on ``…:0``.
     """
     chunks: list[Chunk] = []
-    ordinal = 0
+    ordinal = start_ordinal
     for headings, body in _sections(markdown):
         units = _size_bounded_units(body, size=size, overlap=overlap, count_tokens=count_tokens)
         metadata = {"headings": headings} if headings else {}
