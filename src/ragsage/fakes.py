@@ -39,6 +39,7 @@ from ragsage.models import (
     Turn,
     Vector,
 )
+from ragsage.parsing.identity import document_for, read_bytes
 from ragsage.query import NOT_FOUND_MESSAGE
 from ragsage.scope import Scope
 
@@ -140,9 +141,10 @@ class FakeDocumentParser:
     _IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".bmp")
 
     def parse(self, source: RawSource) -> ParsedDocument:
-        content = self._read(source)
-        digest = hashlib.sha256(content).hexdigest()
-        document = Document(id=digest[:16], source=source.name, content_hash=digest)
+        content = read_bytes(source)
+        # Content-derived identity through the one shared helper, so the fake keys
+        # documents byte-for-byte the same way the real parser paths do.
+        document = document_for(source, content)
 
         if self._is_image(source):
             pages = [Page(number=1, image=PageImage(ref=source.name, data=content))]
@@ -155,14 +157,6 @@ class FakeDocumentParser:
         if source.media_type and source.media_type.startswith("image/"):
             return True
         return source.name.lower().endswith(self._IMAGE_SUFFIXES)
-
-    @staticmethod
-    def _read(source: RawSource) -> bytes:
-        if source.content is not None:
-            return source.content
-        assert source.path is not None  # RawSource guarantees one is set
-        with open(source.path, "rb") as fh:
-            return fh.read()
 
 
 class FakePageClassifier:

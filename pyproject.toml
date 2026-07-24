@@ -6,7 +6,15 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 keywords = ["rag", "retrieval", "llm", "embeddings", "citations", "vector-search"]
-dependencies = []
+# The core was historically dependency-free; the heuristic parser (ragsage.parsing)
+# retires that. These are all pure-Python / pure-Rust and pull in no numpy>=2,
+# torch, or onnxruntime — so the library still runs on the deployment's
+# x86-64-v1 CPU. Token counting uses tiktoken, deliberately not transformers.
+dependencies = [
+    "langchain-text-splitters>=0.3",
+    "tiktoken>=0.8",
+    "puremagic>=1.28",
+]
 
 [project.scripts]
 ragsage = "ragsage.cli:main"

@@ -1,4 +1,4 @@
-"""Parser-neutral parsing helpers — currently the page-route classifier.
+"""The page-route classifier — parser-neutral routing policy.
 
 A :class:`~ragsage.ports.DocumentParser` measures each page (its text layer, how
 much of it a raster image covers) and records that as a
