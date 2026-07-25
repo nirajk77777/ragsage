@@ -232,18 +232,45 @@ class Turn:
     answer: str
 
 
+class Outcome(enum.StrEnum):
+    """How a query resolved — the three ways a reply can end.
+
+    ``ANSWERED`` is the product: prose drawn from retrieved sources, every claim
+    carrying a citation. ``NOT_FOUND`` is the honest refusal — the corpus was
+    searched and couldn't support an answer. ``CONVERSATIONAL`` is a reply to a
+    message that was never a question about the corpus (a greeting, a thanks,
+    "what can you do?"); nothing was searched, so there is nothing to have found.
+
+    The distinction between the last two is not cosmetic: both are ungrounded and
+    uncited, but only ``NOT_FOUND`` means "I looked in your documents". Telling a
+    user their greeting wasn't in their documents is a lie about what happened.
+    """
+
+    ANSWERED = "answered"
+    NOT_FOUND = "not_found"
+    CONVERSATIONAL = "conversational"
+
+
 @dataclass(frozen=True)
 class Answer:
     """The result of a query: grounded prose plus verifiable citations.
 
-    When the corpus can't support an answer, ``grounded`` is ``False``, ``text``
-    is the honest not-found message, and ``citations`` is empty — the engine
-    never fabricates a confident answer out of thin retrieval.
+    When the corpus can't support an answer, ``outcome`` is
+    :attr:`Outcome.NOT_FOUND`, ``text`` is the honest not-found message, and
+    ``citations`` is empty — the engine never fabricates a confident answer out
+    of thin retrieval. ``grounded`` stays the one-bit read of that ("is this
+    backed by sources?"), derived rather than stored so it can never disagree
+    with the outcome it summarises.
     """
 
     text: str
     citations: Sequence[Citation] = ()
-    grounded: bool = True
+    outcome: Outcome = Outcome.ANSWERED
+
+    @property
+    def grounded(self) -> bool:
+        """Whether the text is supported by the cited sources."""
+        return self.outcome is Outcome.ANSWERED
 
 
 # --------------------------------------------------------------------------- #
@@ -288,7 +315,12 @@ class AnswerComplete:
 
     text: str
     citations: Sequence[Citation] = ()
-    grounded: bool = True
+    outcome: Outcome = Outcome.ANSWERED
+
+    @property
+    def grounded(self) -> bool:
+        """Whether the text is supported by the cited sources."""
+        return self.outcome is Outcome.ANSWERED
 
 
 AnswerEvent = AnswerToken | Citation | Usage | AnswerComplete

@@ -271,11 +271,26 @@ class FakeLLMClient:
     text followed by ``[n]`` markers for every relevant source — giving a
     grounded, citable answer with zero model calls. ``transcribe`` decodes the
     image bytes as the "vision" reading of a scanned page.
+
+    It also answers the small-talk prompt, which carries a ``Message:`` line
+    instead of sources: a fixed friendly sentence, so the conversational path is
+    exercisable offline exactly like the grounded one.
     """
 
     _SOURCE = re.compile(r"^\[(\d+)\]\s+(.*)$")
 
+    SMALL_TALK_REPLY = (
+        "Hello! Ask me anything about your uploaded documents and I'll answer with citations."
+    )
+    """What the fake replies to a conversational message. Fixed, so tests can
+    assert on it without pinning the wording of a real model."""
+
     async def generate(self, prompt: str) -> AsyncIterator[str]:
+        if "Sources:" not in prompt and "\nMessage: " in prompt:
+            for word in self.SMALL_TALK_REPLY.split():
+                yield word + " "
+            return
+
         sources, question = self._parse_prompt(prompt)
         q = _content_tokens(question)
         relevant = [(m, text) for m, text in sources if q & _content_tokens(text)]

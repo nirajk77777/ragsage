@@ -32,6 +32,7 @@ from ragsage.models import (
     Citation,
     Document,
     EmbeddedChunk,
+    Outcome,
     Page,
     PageImage,
     PageLayout,
@@ -45,11 +46,13 @@ from ragsage.models import (
 )
 from ragsage.query import NOT_FOUND_MESSAGE, QueryEngine
 from ragsage.scope import Scope
+from ragsage.smalltalk import SMALL_TALK, is_small_talk
 
 __version__ = "0.1.0"
 
 __all__ = [
     "NOT_FOUND_MESSAGE",
+    "SMALL_TALK",
     "Answer",
     "AnswerComplete",
     "AnswerEvent",
@@ -68,6 +71,7 @@ __all__ = [
     "IngestionConfig",
     "IngestionPipeline",
     "IngestionResult",
+    "Outcome",
     "Page",
     "PageImage",
     "PageLayout",
@@ -84,5 +88,6 @@ __all__ = [
     "Vector",
     "__version__",
     "default_golden_set",
+    "is_small_talk",
     "run_golden_eval",
 ]
