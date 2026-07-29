@@ -1,0 +1,104 @@
+# Measuring `HeadingWindowContextualizer`
+
+Ticket 07 required a measurement on the built-in golden set against
+no-contextualisation. That measurement was run and is reported first. It is
+**uninformative**, for reasons worth recording, so a second measurement isolates
+the mechanism the contextualizer actually changes.
+
+All numbers are from offline fakes, reproducible with no network and no database.
+
+## 1. The built-in golden set — saturated, cannot discriminate
+
+Three arms over `ragsage.goldens.default_golden_set()`:
+
+| arm | faithfulness | relevancy | citation precision | citation recall |
+| --- | --- | --- | --- | --- |
+| A — `contextualize=False` | 1.000 | 1.000 | 1.000 | 1.000 |
+| B — `FakeContextualizer` | 1.000 | 1.000 | 1.000 | 1.000 |
+| C — `HeadingWindowContextualizer` | 1.000 | 1.000 | 1.000 | 1.000 |
+
+Every arm scores perfectly, so the comparison says nothing. This is a property of
+the corpus, not a result about contextualisation. The built-in golden set is four
+**single-sentence, heading-free `.txt` files**:
+
+```
+france.txt   Paris is the capital of France. It sits on the Seine river.
+biology.txt  The mitochondrion is the powerhouse of the cell and produces ATP.
+python.txt   Python is a high-level programming language created by Guido van Rossum.
+space.txt    The Moon is Earth's only natural satellite and orbits the planet monthly.
+```
+
+There are no headings, so there is no heading path to prepend. There is only one
+paragraph per document, so there are no neighbours to window over. On this corpus
+`HeadingWindowContextualizer` emits `Document: <filename>` and nothing else — it is
+very nearly arm A by construction. Each question also shares an obvious term with
+its one-sentence answer, so retrieval is trivial for every arm.
+
+**The built-in golden set cannot measure this feature.** That is the honest finding
+for this checkbox, and it is a gap worth knowing about independently: the golden set
+is a smoke test for the pipeline, not a retrieval benchmark.
+
+## 2. Dense-retrieval probe — the stage contextualisation touches
+
+Contextualisation only alters `embed_text`, so it can only affect the dense vector
+search. (Note `FakeReranker` rescores on `chunk.text`, the clean passage, so the
+rerank stage is blind to it by design.) This probe measures dense retrieval
+directly, using the **real** `HeuristicBackend` for parse and chunk — the fake
+chunker writes no `metadata["headings"]`, so only the real one exercises the
+heading path — with the fake embedder and stores.
+
+The corpus is built so that the identifying noun for each answer appears **only in
+its section heading**, never in the paragraph that answers the question:
+
+```markdown
+## The Antikythera mechanism
+
+It modelled the motion of the planets and predicted eclipses decades ahead.
+```
+
+This is the "it / the device" problem contextual retrieval exists to fix. Six such
+questions across two documents, nine sections total:
+
+| arm | hit@1 | MRR |
+| --- | --- | --- |
+| A — `contextualize=False` | 3/6 | 0.575 |
+| B — `FakeContextualizer` | 3/6 | 0.575 |
+| C — `HeadingWindowContextualizer` | **6/6** | **1.000** |
+
+Arm B matching arm A exactly is the point of the ticket in one line: the only
+`Contextualizer` previously shipped in the library prepends
+`[Context: <filename>]`, which adds no term any of these questions ask about. It
+looks like contextualisation and buys nothing.
+
+### How much of this to believe
+
+The gain is real but the corpus is **constructed to exhibit it**, so treat 6/6 as
+evidence the mechanism works, not as an expected production delta:
+
+- The corpus is adversarial to arm A on purpose — the answer chunks contain no
+  query term at all. Prose where the subject is restated in each paragraph has far
+  less to gain.
+- `FakeEmbedder` is a hashing embedder whose cosine tracks *term overlap*. Adding
+  the literal token "Antikythera" to `embed_text` therefore helps it maximally. A
+  real embedder matches semantically and would recover some of arm A's misses on
+  its own, so the production gap will be narrower.
+- Six probes is a small sample; the interval around 3/6 is wide.
+
+What the probe does establish, and what the unit tests then pin down, is that the
+heading path reaches `embed_text`, survives the token budget, and changes which
+chunk dense search returns first.
+
+## Cost
+
+Zero model calls and zero network. The cost is tokens: the context header plus
+window is charged against `max_context_tokens` (default 128) and added to each
+chunk's `embed_text`, so a corpus embedded with contextualisation on pays roughly
+that many extra tokens per chunk at ingest. `text` is untouched, so nothing changes
+about what a user is shown or what an answer quotes.
+
+## Reproducing
+
+Both measurements are scripts against the public API — `run_golden_eval` now takes
+`contextualizer` and `config` so the arms can be swapped without forking it. Arm C
+is the CLI default: `ragsage ingest ./docs` uses `HeadingWindowContextualizer`,
+`--contextualizer fake` selects arm B, and `--no-contextualize` selects arm A.

@@ -18,10 +18,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
+from ragsage.config import IngestionConfig
 from ragsage.evaluation import EvalExample, EvalReport, EvalThresholds, Evaluator
 from ragsage.fakes import FakeEngineKit
 from ragsage.ingestion import IngestionPipeline
 from ragsage.models import RawSource
+from ragsage.ports import Contextualizer
 from ragsage.query import NOT_FOUND_MESSAGE, QueryEngine
 from ragsage.scope import Scope
 
@@ -92,13 +94,25 @@ def default_golden_set() -> GoldenSet:
     return GoldenSet(corpus=dict(_CORPUS), examples=list(_EXAMPLES))
 
 
-async def run_golden_eval(golden: GoldenSet | None = None) -> EvalReport:
+async def run_golden_eval(
+    golden: GoldenSet | None = None,
+    *,
+    contextualizer: Contextualizer | None = None,
+    config: IngestionConfig | None = None,
+) -> EvalReport:
     """Ingest the golden corpus into fresh fakes and score its questions.
 
     Wires a :class:`FakeEngineKit` exactly as the CLI does, ingests every corpus
     document, resolves each example's filenames to the ids the parser assigned,
     and returns the evaluator's :class:`EvalReport`. Fully offline and
     deterministic — the same run every time, so it can gate CI.
+
+    ``contextualizer`` and ``config`` exist so one corpus can be scored under
+    different contextualisation arms — the comparison
+    :class:`~ragsage.contextualizing.HeadingWindowContextualizer` had to justify
+    itself against. They default to the fake and to
+    :class:`~ragsage.config.IngestionConfig`'s own defaults, so an existing caller
+    sees no change.
     """
     golden = golden or default_golden_set()
     kit = FakeEngineKit()
@@ -106,7 +120,7 @@ async def run_golden_eval(golden: GoldenSet | None = None) -> EvalReport:
         parser=kit.parser,
         classifier=kit.classifier,
         chunker=kit.chunker,
-        contextualizer=kit.contextualizer,
+        contextualizer=contextualizer if contextualizer is not None else kit.contextualizer,
         embedder=kit.embedder,
         vector_store=kit.vector_store,
         lexical_store=kit.lexical_store,
@@ -119,7 +133,7 @@ async def run_golden_eval(golden: GoldenSet | None = None) -> EvalReport:
 
     ids_by_source: dict[str, str] = {}
     for name, body in golden.corpus.items():
-        result = await pipeline.ingest(RawSource(name=name, content=body), scope)
+        result = await pipeline.ingest(RawSource(name=name, content=body), scope, config)
         ids_by_source[name] = result.document.id
 
     dataset = [

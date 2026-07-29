@@ -10,6 +10,13 @@ The public surface is three façades — :class:`IngestionPipeline`,
 :class:`QueryEngine`, :class:`Evaluator` — driven through the ports in
 :mod:`ragsage.ports`, over the domain models in :mod:`ragsage.models`. Ready-made
 in-memory adapters live in :mod:`ragsage.fakes` so the whole loop runs offline.
+
+A few ports also have a *real*, model-free implementation shipped in the library
+rather than a fake. They stay in their own modules so importing ``ragsage`` never
+drags a parser or a tokenizer in:
+:class:`ragsage.parsing.HeuristicBackend` (parse + chunk) and
+:class:`ragsage.contextualizing.HeadingWindowContextualizer` (deterministic
+contextual retrieval).
 """
 
 from ragsage.config import IngestionConfig, QueryOptions
