@@ -1,0 +1,44 @@
+
+==============================================================================
+B1 — fakes.py silently drops the new typed fields
+==============================================================================
+  _chunk_to_dict keys           : ['document_id', 'embed_text', 'id', 'metadata', 'ordinal', 'page', 'text']
+  block_type after round trip   : None
+  caption after round trip      : ''
+  -> SILENT loss, not a crash. Two functions (fakes.py:103, :115) must gain
+     three fields each, and until they do the CLI's ingest -> JSON -> query
+     round trip erases the type with no error. Chunk.metadata has no such
+     problem: it is already serialised.
+
+==============================================================================
+B2 — the block path loses metadata['headings']
+==============================================================================
+  page.blocks                   : [('text', '## Catalog'), ('table', '| a | b |\n| --- | --- |\n| 1 | 2 |')]
+  chunk 65c9ab97c44aa3fb:0: block_type='text' metadata={} text='## Catalog'
+  chunk 65c9ab97c44aa3fb:1: block_type='table' metadata={} text='| a | b |\n| --- | --- |\n| 1 | 2 |'
+  -> The two-pass chunker's structural pass is DOCUMENT-scoped
+     (chunking.py:_sections). Chunking block-by-block runs it per block, so
+     the heading never reaches the table's chunk, and the heading itself
+     becomes an orphan chunk. metadata['headings'] is now {} where it was
+     ['Catalog'] — which is exactly what src/ragsage/contextualizing.py:246
+     (HeadingWindowContextualizer, ticket 07) reads.
+
+==============================================================================
+B3 — the shipped fakes produce no blocks and no block types
+==============================================================================
+  FakeDocumentParser page.blocks: []
+  FakeChunker block_types       : [None]
+  -> The CLI, examples/, and every Seam-1 test run entirely on the fakes, so
+     under (b) the whole typed-block model is invisible and untested from the
+     library's own shipped entry points until both fakes are widened too.
+
+==============================================================================
+B4 — test suite with arm-b.patch applied (1 of 5 format paths converted)
+==============================================================================
+tests/test_heuristic_backend.py:222: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_heuristic_backend.py::test_oversized_table_is_split_by_rows_with_header_repeated
+1 failed, 206 passed in 0.86s
+
+mypy src examples:
+Success: no issues found in 31 source files

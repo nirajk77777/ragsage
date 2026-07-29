@@ -1,0 +1,110 @@
+
+==============================================================================
+FINDING 0 — the Chunker port cannot be used at all without a parse
+==============================================================================
+  HeuristicBackend.chunk(...) without parse() -> RuntimeError: no parsed document stashed for 6d6d082da774629a
+  The shipped Chunker (backend.py:128) pops an in-flight stash keyed by
+  document id, filled only by parse(). A seam that bypasses parsing cannot
+  call the shipped chunker through its own port. Both arms hit this.
+
+==============================================================================
+ARM a1 — collapse every item on a page into one Markdown page
+==============================================================================
+  items in           : 7
+  pages built        : 2
+  chunks produced    : 3
+  metadata keys seen : ['headings']
+    {'id': '6d6d082da774629a:0', 'page': 1, 'metadata': {'headings': ['Orbital Freight Tariffs']}, 'table_shaped_text': False, 'chars': 125}
+    {'id': '6d6d082da774629a:1', 'page': 1, 'metadata': {'headings': ['Orbital Freight Tariffs', 'Rate schedule']}, 'table_shaped_text': True, 'chars': 343}
+    {'id': '6d6d082da774629a:2', 'page': 2, 'metadata': {'headings': ['Scheduling']}, 'table_shaped_text': False, 'chars': 287}
+  chunks whose text contains table syntax: 1
+    6d6d082da774629a:1: 5/8 non-blank lines are table rows -> the chunk is MIXED prose+table
+    ---- verbatim chunk text ----
+    | The committee publishes one rate per destination band. Rebates are negotiated separately.  
+    | Table 1: Per-kilogram tariff by destination band.
+    | 
+    | | Band | Destination | Rate (USD/kg) |
+    | | --- | --- | --- |
+    | | A | Low earth orbit | 2400 |
+    | | B | Geostationary transfer | 5900 |
+    | | C | Lunar injection | 11200 |
+    | 
+    | Rates exclude the 4% range-safety levy.
+    -----------------------------
+
+==============================================================================
+ARM a2 — same Markdown collapse, but chunked per item with metadata
+==============================================================================
+  chunks produced    : 7
+  metadata keys seen : ['block_type', 'caption', 'footnote', 'headings']
+    {'id': '6d6d082da774629a:0', 'page': 1, 'metadata': {'headings': ['Orbital Freight Tariffs'], 'block_type': 'text'}, 'table_shaped_text': False, 'chars': 125}
+    {'id': '6d6d082da774629a:1', 'page': 1, 'metadata': {'headings': ['Orbital Freight Tariffs', 'Rate schedule'], 'block_type': 'text'}, 'table_shaped_text': False, 'chars': 89}
+    {'id': '6d6d082da774629a:2', 'page': 1, 'metadata': {'block_type': 'table', 'headings': ['Orbital Freight Tariffs', 'Rate schedule'], 'caption': 'Table 1: Per-kilogram tariff by destination band.', 'footnote': 'Rates exclude the 4% range-safety levy.'}, 'table_shaped_text': True, 'chars': 251}
+    {'id': '6d6d082da774629a:3', 'page': 2, 'metadata': {'headings': ['Orbital Freight Tariffs', 'Scheduling'], 'block_type': 'text'}, 'table_shaped_text': False, 'chars': 53}
+    {'id': '6d6d082da774629a:4', 'page': 2, 'metadata': {'block_type': 'image', 'headings': ['Orbital Freight Tariffs', 'Scheduling'], 'caption': 'Figure 2: Launch cadence by quarter.', 'footnote': 'Source: internal manifest registry.'}, 'table_shaped_text': False, 'chars': 108}
+    {'id': '6d6d082da774629a:5', 'page': 2, 'metadata': {'block_type': 'equation', 'headings': ['Orbital Freight Tariffs', 'Scheduling']}, 'table_shaped_text': False, 'chars': 54}
+    {'id': '6d6d082da774629a:6', 'page': 2, 'metadata': {'block_type': 'checklist', 'headings': ['Orbital Freight Tariffs', 'Scheduling']}, 'table_shaped_text': False, 'chars': 63}
+  selectable by type : {'text': 3, 'table': 1, 'image': 1, 'equation': 1, 'checklist': 1}
+
+==============================================================================
+FINDING 1 — item -> chunk attribution: which items stay addressable?
+==============================================================================
+  [a1] 6d6d082da774629a:0: ['text'] -> 1:1
+  [a1] 6d6d082da774629a:1: ['text', 'table'] -> 2 items fused
+  [a1] 6d6d082da774629a:2: ['text', 'image', 'equation', 'checklist'] -> 4 items fused
+  [a1] chunks that are exactly one item: 1/3
+
+  [a2] 6d6d082da774629a:0: ['text'] -> 1:1
+  [a2] 6d6d082da774629a:1: ['text'] -> 1:1
+  [a2] 6d6d082da774629a:2: ['table'] -> 1:1
+  [a2] 6d6d082da774629a:3: ['text'] -> 1:1
+  [a2] 6d6d082da774629a:4: ['image'] -> 1:1
+  [a2] 6d6d082da774629a:5: ['equation'] -> 1:1
+  [a2] 6d6d082da774629a:6: ['checklist'] -> 1:1
+  [a2] chunks that are exactly one item: 7/7
+
+
+==============================================================================
+FINDING 2 — does the type survive persistence? (JSON snapshot round-trip)
+==============================================================================
+  chunks restored from JSON: 7
+    6d6d082da774629a:2 metadata={'block_type': 'table', 'headings': ['Orbital Freight Tariffs', 'Rate schedule'], 'caption': 'Table 1: Per-kilogram tariff by destination band.', 'footnote': 'Rates exclude the 4% range-safety levy.'}
+    6d6d082da774629a:1 metadata={'headings': ['Orbital Freight Tariffs', 'Rate schedule'], 'block_type': 'text'}
+  block_type survived snapshot -> restore -> search: True
+  Chunk.metadata is already a free-form Mapping (models.py:171), already
+  serialised by the fakes (fakes.py:103) and already persisted as
+  `metadata jsonb` by ADR-0002 §1. No model change was needed for this.
+
+==============================================================================
+FINDING 3 — what each arm can say about the table at RETRIEVAL time
+==============================================================================
+
+  [a1] answer  : The committee publishes one rate per destination band. Rebates are negotiated separately. [1]
+  [a1] grounded: True, citations: 1
+  [a1] retrieved 6d6d082da774629a:1 block_type=<absent> caption='<absent>' text-looks-like-a-table=True
+
+  [a2] answer  : Table 1: Per-kilogram tariff by destination band. [1][2]
+  [a2] grounded: True, citations: 2
+  [a2] retrieved 6d6d082da774629a:2 block_type=table caption='Table 1: Per-kilogram tariff by destination band.' text-looks-like-a-table=True
+  [a2] retrieved 6d6d082da774629a:1 block_type=text caption='<absent>' text-looks-like-a-table=False
+
+==============================================================================
+FINDING 4 — could a BlockEnricher (report #6) target tables under each arm?
+==============================================================================
+  a1: selectable only by re-sniffing Markdown -> 1 candidate(s)
+      6d6d082da774629a:1 carries 3 non-table line(s) an enricher would
+      have to describe as if they were part of the table:
+        'The committee publishes one rate per destination band. Rebates are negotiated separately.  '
+        'Table 1: Per-kilogram tariff by destination band.'
+        'Rates exclude the 4% range-safety levy.'
+  a2: selectable by metadata -> 1 candidate(s)
+      6d6d082da774629a:2 caption='Table 1: Per-kilogram tariff by destination band.' footnote='Rates exclude the 4% range-safety levy.' (separable, not inlined prose)
+
+==============================================================================
+FINDING 5 — what a2 costs: packing across items is gone
+==============================================================================
+  a1 chunks: 3   a2 chunks: 7
+  a1's _pack() merges small neighbouring units into one chunk
+  (chunking.py:238); a2 chunks each item in isolation, so a one-line
+  custom item becomes its own chunk. Same corpus, more and smaller chunks.
+  smallest chunk: a1=125 chars, a2=53 chars
