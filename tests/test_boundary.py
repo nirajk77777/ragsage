@@ -27,8 +27,31 @@ from pathlib import Path
 
 _SRC = Path(__file__).resolve().parent.parent / "src" / "ragsage"
 
-# The storage package, relative to _SRC. The one place the driver may appear.
-_STORAGE = "storage"
+# Where the database driver may appear, relative to _SRC: the storage package that
+# owns the SQL, and the assembler that wires it up. ``sage.py`` is a *composition
+# root* — its entire job is to build the Postgres stores from a config — so keeping
+# the driver out of it would mean either lying about its parameter types or moving
+# the wiring back onto the consumer, which is the problem ticket 05 removed.
+_DRIVER_ALLOWED = frozenset({"storage", "sage.py"})
+
+# The modules whose driver-freedom is the actual invariant. Naming them positively
+# says what the rule protects rather than what it happens to exclude: these are the
+# engine and its contract, and they must reach persistence only through the ports so
+# a consumer can inject a store that is not Postgres.
+_ENGINE_CORE = (
+    "ingestion.py",
+    "query.py",
+    "ports.py",
+    "models.py",
+    "fakes.py",
+    "config.py",
+    "scope.py",
+    "evaluation.py",
+    "goldens.py",
+    "cli.py",
+    "contextualizing.py",
+    "caching.py",
+)
 
 # Web frameworks, auth/JWT, the backend package, task queues, and network
 # clients — nothing the tenancy-agnostic engine may know about, anywhere.
@@ -75,8 +98,10 @@ def _imported_roots(source: str) -> set[str]:
     return roots
 
 
-def _is_storage(path: Path) -> bool:
-    return path.relative_to(_SRC).parts[0] == _STORAGE
+def _may_import_the_driver(path: Path) -> bool:
+    relative = path.relative_to(_SRC)
+    # Either inside an allowed package (storage/) or an allowed module (sage.py).
+    return relative.parts[0] in _DRIVER_ALLOWED
 
 
 def test_ragsage_imports_nothing_web_auth_or_tenant() -> None:
@@ -89,24 +114,56 @@ def test_ragsage_imports_nothing_web_auth_or_tenant() -> None:
     assert not offenders, f"forbidden imports found: {offenders}"
 
 
-def test_the_database_driver_stays_inside_the_storage_package() -> None:
-    """ADR-0002 lets ragsage own its storage — it does not let the driver spread.
+def test_the_engine_core_never_imports_a_database_driver() -> None:
+    """The invariant that matters, stated positively over the modules it protects.
 
-    Everything outside ``ragsage/storage/`` must still reach persistence only
-    through the ports, so a consumer can inject a store that is not Postgres.
+    These are the engine and its contract. If any of them reached for the driver
+    directly, the ports would stop being a real seam and a consumer could no longer
+    inject a store that is not Postgres.
+    """
+    offenders: dict[str, set[str]] = {}
+    for name in _ENGINE_CORE:
+        path = _SRC / name
+        assert path.exists(), f"{name} is listed in _ENGINE_CORE but does not exist"
+        bad = _imported_roots(path.read_text()) & _DATABASE_PACKAGES
+        if bad:
+            offenders[name] = bad
+
+    assert not offenders, (
+        f"the engine core imported a database driver: {offenders}. Persistence must "
+        f"reach these modules only through the ports, so the stores stay swappable."
+    )
+
+
+def test_the_parser_never_imports_a_database_driver() -> None:
+    offenders: dict[str, set[str]] = {}
+    for path in (_SRC / "parsing").rglob("*.py"):
+        bad = _imported_roots(path.read_text()) & _DATABASE_PACKAGES
+        if bad:
+            offenders[str(path.relative_to(_SRC))] = bad
+
+    assert not offenders, f"database driver imported inside ragsage/parsing/: {offenders}"
+
+
+def test_the_database_driver_stays_where_it_is_allowed() -> None:
+    """The catch-all, so a *new* module cannot quietly reach for the driver.
+
+    ADR-0002 lets ragsage own its storage; it does not let the driver spread. Only
+    ``storage/`` (which owns the SQL) and ``sage.py`` (the composition root that
+    wires it) may import it — anything else is either a mistake or a decision that
+    belongs in this list with a reason.
     """
     offenders: dict[str, set[str]] = {}
     for path in _SRC.rglob("*.py"):
-        if _is_storage(path):
+        if _may_import_the_driver(path):
             continue
         bad = _imported_roots(path.read_text()) & _DATABASE_PACKAGES
         if bad:
             offenders[str(path.relative_to(_SRC))] = bad
 
     assert not offenders, (
-        f"database driver imported outside ragsage/storage/: {offenders}. "
-        f"ADR-0002 scopes the driver to the storage package; the engine and the "
-        f"parser reach persistence through the ports so the stores stay swappable."
+        f"database driver imported outside {sorted(_DRIVER_ALLOWED)}: {offenders}. "
+        f"Reach persistence through the ports, or add the module here with a reason."
     )
 
 
@@ -117,16 +174,24 @@ def test_source_tree_was_actually_scanned() -> None:
     assert {"ingestion.py", "query.py", "ports.py", "fakes.py"} <= scanned
 
 
-def test_the_storage_carve_out_is_not_vacuous() -> None:
-    # Guard the guard, other direction: the carve-out above only means something
-    # if the storage package genuinely does import the driver it exempts.
-    storage_imports: set[str] = set()
-    for path in _SRC.rglob("*.py"):
-        if _is_storage(path):
-            storage_imports |= _imported_roots(path.read_text())
+def test_every_driver_carve_out_is_actually_used() -> None:
+    """Guard the guard, other direction: an exemption that exempts nothing is stale.
 
-    assert storage_imports & _DATABASE_PACKAGES, (
-        "ragsage/storage/ imports no database driver, so the carve-out in "
-        "test_the_database_driver_stays_inside_the_storage_package is exempting "
-        "nothing and would not catch a regression."
+    Checked per entry rather than in aggregate, so removing the driver from one
+    allowed location does not hide behind another still using it.
+    """
+    unused: list[str] = []
+    for allowed in sorted(_DRIVER_ALLOWED):
+        target = _SRC / allowed
+        paths = target.rglob("*.py") if target.is_dir() else [target]
+        imports: set[str] = set()
+        for path in paths:
+            imports |= _imported_roots(path.read_text())
+        if not imports & _DATABASE_PACKAGES:
+            unused.append(allowed)
+
+    assert not unused, (
+        f"these entries in _DRIVER_ALLOWED no longer import a database driver: "
+        f"{unused}. They are exempting nothing — drop them from the list so the "
+        f"catch-all keeps its teeth."
     )

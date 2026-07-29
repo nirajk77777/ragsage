@@ -53,6 +53,9 @@ Runnable, argument-free, and offline — start with the first:
 - [`examples/custom_parser.py`](examples/custom_parser.py) — implement
   `DocumentParser` to bypass the built-in `HeuristicBackend` on a format it
   doesn't understand.
+- [`examples/assembled_engine.py`](examples/assembled_engine.py) —
+  `RagSage.from_config(...)`: migrate, ingest, query and purge from one config
+  object instead of hand-wiring ports. Wants a Postgres and skips without one.
 
 ## When retrieval looks wrong
 

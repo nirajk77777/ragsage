@@ -31,8 +31,11 @@ jobs:
 
       # And run them for real: type-checking wouldn't catch an example that
       # imports fine but no longer produces an answer.
+      # assembled_engine.py skips itself with a message when TEST_DATABASE_URL is
+      # unset, so it is safe to run here unconditionally.
       - name: Run the examples
         run: |
           uv run python examples/fakes_end_to_end.py
           uv run python examples/custom_embedder.py
           uv run python examples/custom_parser.py
+          uv run python examples/assembled_engine.py
