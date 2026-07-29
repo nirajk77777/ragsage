@@ -22,10 +22,19 @@ from ragsage.storage.engine import Database, create_engine, create_sessionmaker
 from ragsage.storage.identifiers import safe_identifier, safe_setting_name
 from ragsage.storage.schema import TABLE, migrate, migration_statements
 from ragsage.storage.session import Statement, isolation_preamble, open_scoped_session
+from ragsage.storage.stores import (
+    PgDocumentStore,
+    PgLexicalStore,
+    PgVectorStore,
+    purge_namespace,
+)
 
 __all__ = [
     "TABLE",
     "Database",
+    "PgDocumentStore",
+    "PgLexicalStore",
+    "PgVectorStore",
     "PostgresConfig",
     "Statement",
     "create_engine",
@@ -34,6 +43,7 @@ __all__ = [
     "migrate",
     "migration_statements",
     "open_scoped_session",
+    "purge_namespace",
     "safe_identifier",
     "safe_setting_name",
 ]
