@@ -1,6 +1,7 @@
 """Tests for the ragsage CLI — the library's standalone driver."""
 
 import pytest
+
 from ragsage.cli import main
 
 

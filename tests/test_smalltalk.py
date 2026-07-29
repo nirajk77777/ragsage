@@ -11,12 +11,12 @@ every tie.
 from __future__ import annotations
 
 import pytest
+
+from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
 from ragsage.fakes import FakeEngineKit, FakeLLMClient
 from ragsage.models import AnswerComplete, AnswerToken, Outcome, Usage
 from ragsage.query import NOT_FOUND_MESSAGE
 from ragsage.smalltalk import is_small_talk, normalise
-
-from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
 
 BIOLOGY = b"The mitochondrion is the powerhouse of the cell and produces ATP."
 

@@ -11,11 +11,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
 from ragsage.fakes import FakeEngineKit, FakeQueryRewriter, RecordedSpan
 from ragsage.models import PageImage, Turn
 from ragsage.query import NOT_FOUND_MESSAGE
-
-from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
 
 FRANCE = b"Paris is the capital of France. It sits on the Seine river."
 BIOLOGY = b"The mitochondrion is the powerhouse of the cell and produces ATP."

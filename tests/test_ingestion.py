@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import AsyncIterator
 
+from ragsage import Chunk, IngestionConfig, IngestionPipeline, PageRoute, RawSource, Scope
 from ragsage.fakes import FakeEngineKit, FakeLLMClient
 from ragsage.models import (
     Document,
@@ -17,8 +18,6 @@ from ragsage.models import (
     PageLayout,
     ParsedDocument,
 )
-
-from ragsage import Chunk, IngestionConfig, IngestionPipeline, PageRoute, RawSource, Scope
 
 FRANCE = b"Paris is the capital of France. It sits on the Seine river.\fLyon is a French city."
 

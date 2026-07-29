@@ -49,9 +49,7 @@ _CLASSIFIER = LayoutPageClassifier()
 
 # A vision-forced layout for the degrade path: no trustworthy text, page-filling
 # raster — so the classifier routes to VISION on every one of its three signals.
-_VISION_FALLBACK_LAYOUT = PageLayout(
-    text_chars=0, image_area_ratio=1.0, bitmap_area=1_000_000.0
-)
+_VISION_FALLBACK_LAYOUT = PageLayout(text_chars=0, image_area_ratio=1.0, bitmap_area=1_000_000.0)
 
 # Rendered-image scale (2x ~= 144 DPI) — enough for a vision model to read a
 # scan, small enough to keep the PNG cheap.
@@ -103,9 +101,7 @@ def parse_pdf(source: RawSource, content: bytes) -> list[Page]:
         renderer.close()
 
 
-def _parse_page(
-    source: RawSource, plumber_page: Any, renderer: Any, number: int
-) -> Page:
+def _parse_page(source: RawSource, plumber_page: Any, renderer: Any, number: int) -> Page:
     """One page → a ``Page``, routing to vision (with a rendered image) as needed."""
     ref = f"{source.name}#page={number}"
     try:
@@ -121,9 +117,7 @@ def _parse_page(
         )
 
     if _routes_to_vision(layout, markdown):
-        image: PageImage | None = PageImage(
-            ref=ref, data=_render_png(renderer, number - 1)
-        )
+        image: PageImage | None = PageImage(ref=ref, data=_render_png(renderer, number - 1))
     else:
         image = None
     return Page(number=number, text=markdown, image=image, layout=layout)
@@ -307,9 +301,7 @@ def _make_line(words: list[dict[str, Any]]) -> dict[str, Any]:
 _MIN_COLUMN_HEIGHT_FRAC = 0.6
 
 
-def _column_bands(
-    words: list[dict[str, Any]], page_width: float
-) -> list[tuple[float, float]]:
+def _column_bands(words: list[dict[str, Any]], page_width: float) -> list[tuple[float, float]]:
     """Find column x-ranges by locating the true vertical gutters between words.
 
     Word x-spans accumulated over *every* line fill the width of a single-column
@@ -371,13 +363,9 @@ def _modal_size(words: list[dict[str, Any]]) -> float:
     return float(sizes.most_common(1)[0][0])
 
 
-def _heading_levels(
-    lines: list[dict[str, Any]], body_size: float
-) -> dict[float, int]:
+def _heading_levels(lines: list[dict[str, Any]], body_size: float) -> dict[float, int]:
     """Rank the distinct heading font sizes biggest-first into levels 1…4."""
-    heading_sizes = {
-        line["size"] for line in lines if _is_heading(line, body_size)
-    }
+    heading_sizes = {line["size"] for line in lines if _is_heading(line, body_size)}
     ordered = sorted(heading_sizes, reverse=True)
     return {size: min(index + 1, 4) for index, size in enumerate(ordered)}
 
@@ -435,9 +423,7 @@ def _ruled_tables(page: Any) -> list[dict[str, Any]]:
         markdown = _table_to_markdown(table.extract())
         if markdown:
             bbox = tuple(float(v) for v in table.bbox)
-            tables.append(
-                {"kind": "table", "bbox": bbox, "top": bbox[1], "md": markdown}
-            )
+            tables.append({"kind": "table", "bbox": bbox, "top": bbox[1], "md": markdown})
     return tables
 
 
@@ -526,9 +512,7 @@ def _clean_cell(cell: str | None) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _inside_any(
-    word: dict[str, Any], bboxes: list[tuple[float, float, float, float]]
-) -> bool:
+def _inside_any(word: dict[str, Any], bboxes: list[tuple[float, float, float, float]]) -> bool:
     """Whether a word's centre falls inside any table bbox (so it's the table's, not prose)."""
     cx = (float(word["x0"]) + float(word["x1"])) / 2
     cy = (float(word["top"]) + float(word["bottom"])) / 2

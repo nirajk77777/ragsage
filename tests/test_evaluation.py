@@ -8,10 +8,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from ragsage.evaluation import EvalExample, EvalThresholds
-from ragsage.models import PageImage
-from ragsage.query import NOT_FOUND_MESSAGE
-
 from ragsage import (
     Evaluator,
     IngestionPipeline,
@@ -21,6 +17,9 @@ from ragsage import (
     default_golden_set,
     run_golden_eval,
 )
+from ragsage.evaluation import EvalExample, EvalThresholds
+from ragsage.models import PageImage
+from ragsage.query import NOT_FOUND_MESSAGE
 
 FRANCE = b"Paris is the capital of France."
 BIOLOGY = b"The mitochondrion produces ATP in the cell."

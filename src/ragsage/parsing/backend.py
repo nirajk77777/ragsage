@@ -97,9 +97,7 @@ class HeuristicBackend:
             markdown = normalize_newlines(content.decode("utf-8", "replace"))
             return [Page(number=_FLOW_FORMAT_PAGE, text=markdown, layout=None)]
         if fmt is DocumentFormat.UNKNOWN:
-            raise ValueError(
-                f"unrecognised document format for source {source.name!r}"
-            )
+            raise ValueError(f"unrecognised document format for source {source.name!r}")
         return _format_parser(fmt)(source, content)
 
     def _take_parsed(self, document_id: str) -> list[Page]:

@@ -7,11 +7,10 @@ fusion/arrangement helpers are unit-tested directly.
 
 from __future__ import annotations
 
+from ragsage import IngestionPipeline, QueryEngine, QueryOptions, RawSource, Scope
 from ragsage.fakes import FakeEngineKit
 from ragsage.models import AnswerComplete, AnswerToken, Chunk, Citation, ScoredChunk, Usage
 from ragsage.query import NOT_FOUND_MESSAGE, _arrange_for_edges, reciprocal_rank_fusion
-
-from ragsage import IngestionPipeline, QueryEngine, QueryOptions, RawSource, Scope
 
 FRANCE = b"Paris is the capital of France. It sits on the Seine river."
 BIOLOGY = b"The mitochondrion is the powerhouse of the cell and produces ATP."
