@@ -48,6 +48,9 @@ dependencies = [
     # tests/test_storage_imports.py.
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",
+    # pgvector's SQLAlchemy type: what lets the dense store express
+    # `cosine_distance` as an expression instead of hand-written SQL.
+    "pgvector>=0.3",
 ]
 
 [project.scripts]
