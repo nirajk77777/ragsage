@@ -60,7 +60,9 @@ def main() -> None:
     source = RawSource(name="d.md", content=MARKDOWN, media_type="text/markdown")
     backend = HeuristicBackend()
     parsed = backend.parse(source)
-    print(f"  page.blocks                   : {[(str(b.type), b.markdown) for b in parsed.pages[0].blocks]}")
+    print(
+        f"  page.blocks                   : {[(str(b.type), b.markdown) for b in parsed.pages[0].blocks]}"
+    )
     chunks = backend.chunk(parsed.document, parsed.pages, size=512, overlap=64)
     for produced in chunks:
         print(
