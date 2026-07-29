@@ -117,8 +117,11 @@ class RagSageConfig:
     query: QueryOptions = field(default_factory=QueryOptions)
 
     def __post_init__(self) -> None:
-        # The two halves each validate themselves; what neither can see is the
-        # other. This is the one cross-cutting invariant available statically.
+        # The two halves each validate themselves; this checks the seam between
+        # them. Note what it cannot check: whether ``providers.embedding_model``
+        # actually emits ``postgres.embedding_dim`` dimensions. No lookup table maps
+        # a model name to a width, so that invariant is enforced by Postgres at the
+        # first insert — a wrong pairing fails loudly there rather than here.
         if not self.providers.embedding_model.strip():
             raise ValueError("RagSageConfig.providers.embedding_model must be set")
 

@@ -113,13 +113,20 @@ class PgVectorStore:
         self._embedding_model = embedding_model
 
     async def upsert(self, scope: Scope, records: Sequence[EmbeddedChunk]) -> None:
-        """Replace the rows for the incoming chunk refs, then insert them.
+        """Replace every chunk of the incoming documents, then insert the new set.
 
-        Delete-then-insert rather than ``ON CONFLICT`` because a re-ingest may
-        produce a *different* set of refs for the same document (a changed chunk
-        size splits differently), and an upsert keyed on the primary key would
-        leave the old rows behind. Clearing the incoming refs first makes a retry
-        idempotent instead of doubling.
+        Delete-then-insert rather than ``ON CONFLICT``, and the delete is scoped to
+        the **document**, not to the incoming chunk refs. That distinction is the
+        whole point: refs are ``<document>:<ordinal>``, so a re-ingest at a larger
+        ``chunk_size`` yields *fewer* refs, and the previous run's high-ordinal rows
+        are not among them. Deleting only the incoming refs would leave that tail
+        behind — still searchable, so a re-index would serve chunks from two
+        different chunkings at once. Deleting by document makes the write a true
+        replacement, and idempotent on retry rather than doubling.
+
+        A caller upserting one document's chunks in several batches therefore has to
+        pass them as one call; that is the honest trade for making re-index correct,
+        and the pipeline already does it.
         """
         if not records:
             return
@@ -129,10 +136,7 @@ class PgVectorStore:
             raise ValueError("PgVectorStore requires an embedding_model to upsert vectors")
 
         await self._session.execute(
-            delete(chunks).where(
-                _C.rag_document_id.in_({r.chunk.document_id for r in records}),
-                _C.chunk_ref.in_([r.chunk.id for r in records]),
-            )
+            delete(chunks).where(_C.rag_document_id.in_({r.chunk.document_id for r in records}))
         )
         await self._session.execute(
             insert(chunks),
@@ -184,11 +188,13 @@ class PgLexicalStore:
 
     The text-search configuration must match the one the generated column was built
     with — a query parsed as ``simple`` against a column stemmed as ``english``
-    silently under-matches — so it is passed in from the same config rather than
-    defaulted independently.
+    silently under-matches. It is therefore **required**, with no default: a default
+    here would be a second declaration of
+    :attr:`~ragsage.storage.config.PostgresConfig.text_search_config`, and the two
+    could drift without anything failing loudly.
     """
 
-    def __init__(self, session: AsyncSession, *, text_search_config: str = "english") -> None:
+    def __init__(self, session: AsyncSession, *, text_search_config: str) -> None:
         self._session = session
         # Reaches SQL as the first argument to websearch_to_tsquery; guarded for the
         # same reason the DDL guards it.

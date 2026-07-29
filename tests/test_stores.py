@@ -61,6 +61,16 @@ def _embedded(chunk: Chunk, seed: float = 1.0) -> EmbeddedChunk:
     return EmbeddedChunk(chunk=chunk, vector=_vector(seed))
 
 
+def _lexical(session: object) -> PgLexicalStore:
+    """The lexical store on the test config's text-search configuration.
+
+    ``text_search_config`` is required with no default (it must match the one the
+    generated column was built with), so tests name it here once rather than at
+    every call site.
+    """
+    return PgLexicalStore(session, text_search_config="english")  # type: ignore[arg-type]
+
+
 # --------------------------------------------------------------------------- #
 # The table description must not drift from the DDL
 # --------------------------------------------------------------------------- #
@@ -185,7 +195,7 @@ async def test_lexical_search_ranks_by_ts_rank(database: Database) -> None:
         )
 
     async with database.session(scope) as session:
-        results = await PgLexicalStore(session).search(scope, "mitochondria", k=5)
+        results = await _lexical(session).search(scope, "mitochondria", k=5)
 
     assert [r.chunk.id for r in results] == ["hit"]
     assert results[0].score > 0.0
@@ -203,7 +213,7 @@ async def test_an_odd_lexical_query_matches_nothing_rather_than_raising(
         )
 
     async with database.session(scope) as session:
-        results = await PgLexicalStore(session).search(scope, query, k=5)
+        results = await _lexical(session).search(scope, query, k=5)
 
     assert results == []
 
@@ -216,7 +226,7 @@ async def test_lexical_search_stems_through_the_generated_column(database: Datab
         )
 
     async with database.session(scope) as session:
-        results = await PgLexicalStore(session).search(scope, "producing", k=5)
+        results = await _lexical(session).search(scope, "producing", k=5)
 
     assert [r.chunk.id for r in results] == ["c:0"]
 
@@ -243,7 +253,7 @@ async def test_an_absent_document_filter_searches_the_whole_corpus(database: Dat
 
     async with database.session(scope) as session:
         dense = await PgVectorStore(session).search(scope, _vector(1.0), k=5)
-        lexical = await PgLexicalStore(session).search(scope, "document", k=5)
+        lexical = await _lexical(session).search(scope, "document", k=5)
 
     assert {r.chunk.id for r in dense} == {"a:0", "b:0"}
     assert {r.chunk.id for r in lexical} == {"a:0", "b:0"}
@@ -256,7 +266,7 @@ async def test_a_present_document_filter_narrows(database: Database) -> None:
 
     async with database.session(scope) as session:
         dense = await PgVectorStore(session).search(scope, _vector(1.0), k=5)
-        lexical = await PgLexicalStore(session).search(scope, "document", k=5)
+        lexical = await _lexical(session).search(scope, "document", k=5)
 
     assert {r.chunk.id for r in dense} == {"a:0"}
     assert {r.chunk.id for r in lexical} == {"a:0"}
@@ -274,7 +284,7 @@ async def test_a_present_but_empty_document_filter_matches_nothing(database: Dat
 
     async with database.session(scope) as session:
         dense = await PgVectorStore(session).search(scope, _vector(1.0), k=5)
-        lexical = await PgLexicalStore(session).search(scope, "document", k=5)
+        lexical = await _lexical(session).search(scope, "document", k=5)
 
     assert dense == []
     assert lexical == []
@@ -336,10 +346,15 @@ async def test_every_store_deletes_the_same_rows(database: Database) -> None:
     """One table, three ports — their deletes must agree and be safe to repeat."""
     scope = Scope(namespace="acme")
 
-    for store_factory in (PgVectorStore, PgLexicalStore, PgDocumentStore):
+    factories = (
+        lambda s: PgVectorStore(s),
+        _lexical,
+        lambda s: PgDocumentStore(s),
+    )
+    for store_factory in factories:
         await _two_documents(database, scope)
         async with database.session(scope) as session:
-            await store_factory(session).delete(scope, "doc-a")  # type: ignore[abstract]
+            await store_factory(session).delete(scope, "doc-a")
             await store_factory(session).delete(scope, "doc-a")  # idempotent
         async with database.session(scope) as session:
             remaining = await PgVectorStore(session).search(scope, _vector(1.0), k=5)
@@ -387,7 +402,7 @@ async def test_one_namespace_cannot_search_another(database: Database) -> None:
 
     async with database.session(globex) as session:
         dense = await PgVectorStore(session).search(globex, _vector(1.0), k=5)
-        lexical = await PgLexicalStore(session).search(globex, "confidential", k=5)
+        lexical = await _lexical(session).search(globex, "confidential", k=5)
         listed = await PgDocumentStore(session).list(globex)
 
     assert dense == []
@@ -429,3 +444,32 @@ def _reconstructable() -> object:
     from ragsage.models import Document
 
     return Document(id="doc-1", source="doc-1", content_hash="h")
+
+
+async def test_re_upserting_fewer_chunks_leaves_no_stale_tail(database: Database) -> None:
+    """A re-ingest that splits into fewer chunks must not leave the old tail behind.
+
+    This is the case a primary-key upsert cannot handle and the reason the write is
+    delete-then-insert: chunk refs are ``<document>:<ordinal>``, so raising
+    ``chunk_size`` produces *fewer* refs and the high-ordinal rows from the previous
+    run are not among the incoming ones. Left behind, they stay searchable — a
+    re-index would silently serve chunks from two different chunkings at once.
+    """
+    scope = Scope(namespace="acme")
+    wide = [_embedded(_chunk(f"doc-1:{i}", f"passage number {i}", ordinal=i)) for i in range(4)]
+    narrow = [_embedded(_chunk(f"doc-1:{i}", f"merged passage {i}", ordinal=i)) for i in range(2)]
+
+    async with database.session(scope) as session:
+        await PgVectorStore(session, embedding_model=_MODEL).upsert(scope, wide)
+    async with database.session(scope) as session:
+        await PgVectorStore(session, embedding_model=_MODEL).upsert(scope, narrow)
+
+    async with database.session(scope) as session:
+        refs = (
+            await session.execute(text(f"SELECT chunk_ref FROM {TABLE} ORDER BY chunk_ref"))
+        ).scalars()
+        surviving = sorted(refs)
+
+    assert surviving == ["doc-1:0", "doc-1:1"], (
+        "the previous chunking's tail survived the re-ingest and is still searchable"
+    )
