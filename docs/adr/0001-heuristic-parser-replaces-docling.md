@@ -1,7 +1,28 @@
 # 0001 — Heuristic parser replaces Docling
 
-- Status: Accepted
+- Status: Accepted — **premise amended 2026-07-29** (see Amendment below)
 - Date: 2026-07-24
+
+> **Amendment, 2026-07-29 — the CPU premise no longer holds.**
+> This ADR's driver was that the deployment VPS exposed only **x86-64-v1**. Re-verified
+> directly on the box: `lscpu` now reports an **Intel Xeon Gold 6240** with
+> `sse4_2 ssse3 sse4_1 popcnt avx avx2 f16c fma bmi2` all present, and
+> `ld-linux-x86-64.so.2 --help` lists **x86-64-v4 / v3 / v2** as "supported, searched".
+> `numpy==2.5.1` installs, imports, and runs float64 and `linalg` operations correctly in a
+> container on that host. The provider appears to have moved the VM to host-passthrough
+> (the BIOS still reports the old i440FX machine type while the CPU model name is now the
+> real host part).
+>
+> **The decision below stands, but its justification changes.** The heuristic parser is kept
+> because it is light, model-free, and needs no multi-gigabyte artifact download — and
+> because the dependency invariant is a real portability promise for an open-source library.
+> It is no longer kept because the hardware forces it. Concretely: `numpy>=2`, `torch`,
+> `onnxruntime`, `transformers` and `magika` are no longer hardware-blocked, Docling is
+> available again should parse quality demand it, and `tests/test_dependency_guard.py` now
+> guards a deliberate choice rather than a physical constraint.
+>
+> ⚠️ This could regress if the VM is migrated or its CPU model reset. Re-check before relying on it.
+> See also ADR-0002, which takes `numpy 2.5.1` (via `voyageai`) into ragsage's core dependencies.
 
 ## Context
 
