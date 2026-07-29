@@ -56,6 +56,21 @@ class RawSource:
         if self.content is None and self.path is None:
             raise ValueError("RawSource needs either content or a path")
 
+    def read(self) -> bytes:
+        """The raw bytes, from memory or from ``path``.
+
+        Lives on the model rather than in a parser helper because the *pipeline*
+        needs the bytes too, to compute the content hash its parse cache keys on
+        before any parser has run. Reaching into ``ragsage.parsing`` for that
+        would pull the whole parser stack — pdfplumber and friends — into a bare
+        ``import ragsage``, which the dependency guard exists to prevent.
+        """
+        if self.content is not None:
+            return self.content
+        assert self.path is not None  # guaranteed by __post_init__
+        with open(self.path, "rb") as handle:
+            return handle.read()
+
 
 @dataclass(frozen=True)
 class PageImage:

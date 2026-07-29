@@ -13,9 +13,11 @@ never on anything private here.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
+from ragsage.caching import decode_parsed, encode_parsed, parse_cache_key
 from ragsage.config import IngestionConfig
 from ragsage.models import (
     Chunk,
@@ -23,6 +25,7 @@ from ragsage.models import (
     EmbeddedChunk,
     Page,
     PageRoute,
+    ParsedDocument,
     RawSource,
 )
 from ragsage.ports import (
@@ -100,9 +103,8 @@ class IngestionPipeline:
         lives in ``scope`` — a failed or repeated upload never reprocesses.
         """
         config = config or IngestionConfig()
-        parsed = self._parser.parse(source)
+        parsed = await self._parse(source)
         document = parsed.document
-        self._tracer.event("parsed", document_id=document.id, pages=len(parsed.pages))
 
         existing = await self._documents.find_by_hash(scope, document.content_hash)
         if existing is not None:
@@ -136,6 +138,53 @@ class IngestionPipeline:
             document=document, chunk_count=len(chunks), route_counts=route_counts
         )
 
+    async def _parse(self, source: RawSource) -> ParsedDocument:
+        """Parse ``source``, or return the cached parse output for its bytes.
+
+        Parsing is the most expensive deterministic step in the pipeline and its
+        result depends only on the document's bytes and the parser reading them,
+        so it is cached by content hash — never by path or filename, so the same
+        bytes hit after a rename, a re-upload, or a move between stores.
+
+        The cache is an optimisation and is treated as untrustworthy on both
+        sides: a miss, a malformed entry, and a cache that raises are all handled
+        by simply parsing. That is the :class:`~ragsage.ports.Cache` port's stated
+        contract, and it is what makes a dead cache a slowdown rather than an
+        outage.
+        """
+        key = parse_cache_key(hashlib.sha256(source.read()).hexdigest(), self._parser)
+
+        cached = await self._cache_get(key)
+        if cached is not None:
+            parsed = decode_parsed(cached)
+            if parsed is not None:
+                self._tracer.event(
+                    "parse_cache_hit", document_id=parsed.document.id, pages=len(parsed.pages)
+                )
+                return parsed
+
+        parsed = self._parser.parse(source)
+        self._tracer.event("parsed", document_id=parsed.document.id, pages=len(parsed.pages))
+        await self._cache_set(key, encode_parsed(parsed))
+        return parsed
+
+    async def _cache_get(self, key: str) -> str | None:
+        """Read through the cache, treating any failure as a miss."""
+        try:
+            return await self._cache.get(key)
+        except Exception:
+            # A cache that is down must not fail an ingest. Deliberately broad:
+            # every adapter failure here has the same correct response.
+            self._tracer.event("cache_unavailable", operation="get")
+            return None
+
+    async def _cache_set(self, key: str, value: str) -> None:
+        """Write through the cache, tolerating failure (e.g. a value too large)."""
+        try:
+            await self._cache.set(key, value)
+        except Exception:
+            self._tracer.event("cache_unavailable", operation="set")
+
     async def _resolve_pages(
         self, pages: Sequence[Page]
     ) -> tuple[list[Page], dict[PageRoute, int]]:
@@ -165,14 +214,14 @@ class IngestionPipeline:
         out: list[Chunk] = []
         for chunk in chunks:
             key = f"ctx:{document.content_hash}:{chunk.id}"
-            cached = await self._cache.get(key)
+            cached = await self._cache_get(key)
             if cached is not None:
                 embed_text = cached
             else:
                 embed_text = await self._contextualizer.contextualize(
                     document, chunk, full_text=full_text
                 )
-                await self._cache.set(key, embed_text)
+                await self._cache_set(key, embed_text)
             out.append(replace(chunk, embed_text=embed_text))
         self._tracer.event("contextualized", document_id=document.id, chunks=len(out))
         return out
