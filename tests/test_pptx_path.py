@@ -25,9 +25,7 @@ from ragsage.models import Page, RawSource
 from ragsage.parsing import HeuristicBackend
 from ragsage.parsing.pptx import parse_pptx
 
-_PPTX_MEDIA_TYPE = (
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-)
+_PPTX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 _SLIDE_TITLE = "Quarterly Results"
 
 

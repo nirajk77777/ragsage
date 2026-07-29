@@ -10,9 +10,9 @@ through the other, exactly as the real backend wires them.
 from __future__ import annotations
 
 import pytest
-from ragsage.fakes import FakeEngineKit
 
 from ragsage import IngestionPipeline, QueryEngine, Scope
+from ragsage.fakes import FakeEngineKit
 
 
 @pytest.fixture

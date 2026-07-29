@@ -52,9 +52,7 @@ _BOILERPLATE_TAGS = ("nav", "header", "footer", "aside", "script", "style", "tem
 
 # Container tags we descend *through* looking for content blocks, rather than
 # treating their text as one paragraph.
-_CONTAINERS = frozenset(
-    {"div", "section", "article", "main", "body", "figure", "details", "html"}
-)
+_CONTAINERS = frozenset({"div", "section", "article", "main", "body", "figure", "details", "html"})
 
 # ``<hN>`` -> ATX heading level. h1..h4 are what the chunker splits on; h5/h6 are
 # still emitted (as ``#####``/``######``) so nothing is lost.
@@ -218,7 +216,9 @@ def _render_table(node: Tag) -> str:
 
 def _cells(row: Tag) -> list[str]:
     """The header/data cell texts of one ``<tr>``, pipes escaped."""
-    return [_inline(cell).replace("|", r"\|") for cell in row.find_all(["th", "td"], recursive=False)]
+    return [
+        _inline(cell).replace("|", r"\|") for cell in row.find_all(["th", "td"], recursive=False)
+    ]
 
 
 def _row(cells: list[str], width: int) -> str:

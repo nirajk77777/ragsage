@@ -84,8 +84,10 @@ def test_heading_hierarchy_serialised_as_atx() -> None:
     assert "# Quarterly Report" in markdown
     assert "## Revenue" in markdown
     assert "### North America" in markdown
-    assert markdown.index("# Quarterly Report") < markdown.index("## Revenue") < markdown.index(
-        "### North America"
+    assert (
+        markdown.index("# Quarterly Report")
+        < markdown.index("## Revenue")
+        < markdown.index("### North America")
     )
 
 

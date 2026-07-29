@@ -10,10 +10,9 @@ the same follow-up is not-found without history and grounded with it.
 
 from __future__ import annotations
 
+from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
 from ragsage.fakes import FakeEngineKit, FakeQueryRewriter
 from ragsage.models import Turn
-
-from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
 
 # One document with a clear antecedent ("the Acme plan") whose pricing a
 # follow-up refers to only by pronoun, plus an unrelated document that must never

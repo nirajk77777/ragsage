@@ -249,11 +249,7 @@ def test_deep_h5_h6_headings_reach_chunk_metadata() -> None:
     # must split on all six levels — a deep h5/h6 section's heading context must
     # reach metadata rather than being swallowed into its parent section.
     count = make_token_counter()
-    doc = (
-        "# Top\n\nintro\n\n"
-        "##### Deep Five\n\nfive body\n\n"
-        "###### Deeper Six\n\nsix body\n"
-    )
+    doc = "# Top\n\nintro\n\n##### Deep Five\n\nfive body\n\n###### Deeper Six\n\nsix body\n"
     chunks = chunk_markdown(
         doc, document_id="deadbeefdeadbeef", page=1, size=512, overlap=64, count_tokens=count
     )
