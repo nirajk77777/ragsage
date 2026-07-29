@@ -5,7 +5,21 @@ description = "A sage that only speaks from your corpus — a reusable, tenancy-
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Niraj Kumar", email = "nirajk77777@gmail.com" }]
 keywords = ["rag", "retrieval", "llm", "embeddings", "citations", "vector-search"]
+# No `License ::` classifier: the license is declared above as an SPDX
+# expression (PEP 639), and PyPI rejects a distribution that states it both ways.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
+
 # The core was historically dependency-free; the heuristic parser (ragsage.parsing)
 # retired that, and the shipped provider adapters (ragsage.providers) go further:
 # per ADR-0002 they are core, not an extra, so `pip install ragsage` plus two API
@@ -56,12 +70,30 @@ dependencies = [
 [project.scripts]
 ragsage = "ragsage.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/nirajk77777/ragsage"
+Repository = "https://github.com/nirajk77777/ragsage"
+Issues = "https://github.com/nirajk77777/ragsage/issues"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ragsage"]
+
+# The sdist ships the repo, which is right for a library people are meant to be
+# able to build and test from source — README, docs, examples and tests all belong
+# in it. These do not: agent scratch space, and `prototypes/`, which holds
+# deliberately throwaway experiments (see prototypes/*/README.md). They live in the
+# repo as a record of how a decision was reached; publishing them would put code
+# nobody should import in front of a first-time reader.
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "prototypes/",
+    ".scratch/",
+    ".claude/",
+]
 
 [dependency-groups]
 # Dev tooling. Kept in step with the backend repo so `ruff`/`mypy`/`pytest`

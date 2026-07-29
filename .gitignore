@@ -19,3 +19,8 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# Agent scratch space. Worktrees checked out here are whole copies of the repo;
+# leaving them untracked-but-unignored is what let one get swept into an sdist.
+.claude/worktrees/
+.scratch/
