@@ -10,6 +10,11 @@ ever touched.
 Because the CLI wires nothing but ports and fakes, it is the living proof that
 the library is self-contained: swapping the fakes for real adapters is the only
 difference between this and the backend.
+
+One port is wired to a *real* implementation rather than a fake:
+:class:`~ragsage.contextualizing.HeadingWindowContextualizer` needs no model and
+no network, so ``--contextualize`` can do the genuine thing offline instead of
+standing in for it. ``--contextualizer fake`` keeps the old tag for comparison.
 """
 
 from __future__ import annotations
@@ -17,14 +22,23 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import ragsage
 from ragsage import IngestionConfig, IngestionPipeline, QueryEngine, RawSource, Scope
-from ragsage.fakes import FakeEngineKit
+from ragsage.contextualizing import HeadingWindowContextualizer
+from ragsage.fakes import FakeContextualizer, FakeEngineKit
+from ragsage.ports import Contextualizer
 
 _DEFAULT_STORE = ".ragsage/state.json"
+
+# Named so `--contextualizer` reads as a choice between real and stand-in rather
+# than between two opaque strings. Both are offline; only one is meaningful.
+_CONTEXTUALIZERS: dict[str, Callable[[], Contextualizer]] = {
+    "heading-window": HeadingWindowContextualizer,
+    "fake": FakeContextualizer,
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest.add_argument("--namespace", default="local", help="Scope namespace (default: local)")
     ingest.add_argument("--no-contextualize", action="store_true", help="Skip contextual retrieval")
+    ingest.add_argument(
+        "--contextualizer",
+        choices=sorted(_CONTEXTUALIZERS),
+        default="heading-window",
+        help=(
+            "How to build each chunk's embed text (default: heading-window, "
+            "deterministic and model-free; 'fake' is the stand-in tag)"
+        ),
+    )
     ingest.set_defaults(func=_cmd_ingest)
 
     query = subparsers.add_parser("query", help="Ask a question against the corpus")
@@ -110,7 +133,7 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         parser=kit.parser,
         classifier=kit.classifier,
         chunker=kit.chunker,
-        contextualizer=kit.contextualizer,
+        contextualizer=_CONTEXTUALIZERS[args.contextualizer](),
         embedder=kit.embedder,
         vector_store=kit.vector_store,
         lexical_store=kit.lexical_store,
