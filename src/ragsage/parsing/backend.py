@@ -100,12 +100,19 @@ class HeuristicBackend:
             raise ValueError(f"unrecognised document format for source {source.name!r}")
         return _format_parser(fmt)(source, content)
 
-    def _take_parsed(self, document_id: str) -> list[Page]:
-        """Pop the stashed pages for one document — consumed once, by ``chunk``."""
-        try:
-            return self._parsed.pop(document_id)
-        except KeyError as exc:  # pragma: no cover - defensive; parse precedes chunk
-            raise RuntimeError(f"no parsed document stashed for {document_id}") from exc
+    def _discard_parsed(self, document_id: str) -> None:
+        """Drop the stashed pages for one document, if this process parsed it.
+
+        The stash exists only so ``parse`` does not leak pages for the lifetime of
+        the backend; it is not an input to chunking, which reads the *resolved*
+        pages the pipeline passes in.
+
+        Absence is therefore not an error. Once the pipeline caches parse output
+        (:mod:`ragsage.caching`), a re-index legitimately chunks a document this
+        backend never parsed — the pages came from the cache. This used to raise
+        ``RuntimeError``, which made a warm parse cache fail every ingest.
+        """
+        self._parsed.pop(document_id, None)
 
     # -- Chunker ------------------------------------------------------------
 
@@ -120,10 +127,12 @@ class HeuristicBackend:
         page list the pipeline built — a page that routed to vision arrives here
         with its transcription filled into ``text`` — so chunking reads from it
         (not the stash) and a scanned PDF page ends up as retrievable as a typed
-        one. The stash is popped purely to enforce parse-before-chunk, once.
+        one. The stash is merely discarded here so parsing does not retain pages
+        for the backend's lifetime — a document whose pages came from the parse
+        cache was never stashed, and that is fine.
         Ordinals run densely across every page so chunk ids stay unique.
         """
-        self._take_parsed(document.id)
+        self._discard_parsed(document.id)
         count_tokens = self._token_counter()
         chunks: list[Chunk] = []
         for page in pages:

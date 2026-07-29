@@ -21,12 +21,13 @@ _ID_PREFIX_LEN = 16
 
 
 def read_bytes(source: RawSource) -> bytes:
-    """The raw bytes of a source, from memory or its path."""
-    if source.content is not None:
-        return source.content
-    assert source.path is not None  # RawSource guarantees one is set
-    with open(source.path, "rb") as handle:
-        return handle.read()
+    """The raw bytes of a source, from memory or its path.
+
+    Delegates to :meth:`RawSource.read`, which is where this lives now that the
+    ingestion pipeline needs the same bytes to key its parse cache. Kept as a
+    function because every parser path in this package already calls it by name.
+    """
+    return source.read()
 
 
 def document_for(source: RawSource, content: bytes) -> Document:

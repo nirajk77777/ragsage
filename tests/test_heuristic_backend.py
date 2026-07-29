@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import sys
 
-import pytest
-
 from ragsage.fakes import FakeEngineKit
 from ragsage.ingestion import IngestionPipeline
 from ragsage.models import Document, RawSource
@@ -85,17 +83,32 @@ def test_backend_satisfies_both_ports_by_shape() -> None:
     assert isinstance(backend, Chunker)
 
 
-def test_stash_is_popped_on_chunk() -> None:
-    # parse stashes the intermediate keyed by document id; chunk consumes it once.
+def test_stash_is_released_on_chunk() -> None:
+    # parse stashes the intermediate keyed by document id so it is not retained for
+    # the backend's lifetime; chunk releases it. Chunking itself reads the resolved
+    # pages it is passed, so releasing the stash must not make chunking fail.
     backend = HeuristicBackend()
     parsed = backend.parse(_md_source(_TABLE_DOC))
 
     first = backend.chunk(parsed.document, parsed.pages, size=512, overlap=64)
-    assert first  # produced chunks from the stashed markdown
+    assert first
+    assert not backend._parsed, "the stash should not outlive chunking"
 
-    # The entry is gone — a second chunk for the same document has nothing to read.
-    with pytest.raises(RuntimeError):
-        backend.chunk(parsed.document, parsed.pages, size=512, overlap=64)
+    # Chunking again is fine and gives the same answer. It has to be: once the
+    # pipeline caches parse output, a re-index chunks documents this backend never
+    # parsed, so an absent stash is a normal state rather than an error.
+    again = backend.chunk(parsed.document, parsed.pages, size=512, overlap=64)
+    assert [c.text for c in again] == [c.text for c in first]
+
+
+def test_chunking_a_document_this_backend_never_parsed_is_allowed() -> None:
+    # The parse-cache path: pages arrive from ragsage.caching, not from parse.
+    parsed = HeuristicBackend().parse(_md_source(_TABLE_DOC))
+
+    fresh = HeuristicBackend()
+    chunks = fresh.chunk(parsed.document, parsed.pages, size=512, overlap=64)
+
+    assert chunks
 
 
 # --------------------------------------------------------------------------- #
