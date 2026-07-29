@@ -41,6 +41,19 @@ scope = Scope(namespace="local")
 # ... build IngestionPipeline / QueryEngine from `kit` and run ingest() / query()
 ```
 
+## Examples
+
+Runnable, argument-free, and offline — start with the first:
+
+- [`examples/fakes_end_to_end.py`](examples/fakes_end_to_end.py) — the whole
+  ingest-and-query loop against the in-memory fakes, in about ten lines of wiring.
+- [`examples/custom_embedder.py`](examples/custom_embedder.py) — implement the
+  `Embedder` port against something that isn't Voyage. The ports are `Protocol`s,
+  so your adapter imports and subclasses nothing from ragsage.
+- [`examples/custom_parser.py`](examples/custom_parser.py) — implement
+  `DocumentParser` to bypass the built-in `HeuristicBackend` on a format it
+  doesn't understand.
+
 ## Public surface
 
 - **Façades:** `IngestionPipeline.ingest`, `QueryEngine.query`, `Evaluator.evaluate`.

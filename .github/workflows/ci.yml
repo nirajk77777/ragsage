@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # --locked fails if uv.lock is stale, so CI installs exactly what a
+      # developer does rather than silently resolving something newer.
+      - run: uv sync --locked
+
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+      # The examples are typed as strictly as the library, so a port signature
+      # change breaks them here before it breaks a reader.
+      - run: uv run mypy src examples
+
+      - run: uv run pytest
+
+      # And run them for real: type-checking wouldn't catch an example that
+      # imports fine but no longer produces an answer.
+      - name: Run the examples
+        run: |
+          uv run python examples/fakes_end_to_end.py
+          uv run python examples/custom_embedder.py
+          uv run python examples/custom_parser.py
