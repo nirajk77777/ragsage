@@ -54,6 +54,15 @@ Runnable, argument-free, and offline — start with the first:
   `DocumentParser` to bypass the built-in `HeuristicBackend` on a format it
   doesn't understand.
 
+## When retrieval looks wrong
+
+The built-in parser is heuristic and model-free by decision
+([ADR-0001](docs/adr/0001-heuristic-parser-replaces-docling.md)), which means it has known
+weak spots — borderless tables, unusual multi-column layouts, vision-route misroutes, and
+documents whose headings are typographically invisible.
+[**docs/failure-modes.md**](docs/failure-modes.md) lists them symptom-first, with how to
+confirm each one from the parser's own output and what to do about it.
+
 ## Public surface
 
 - **Façades:** `IngestionPipeline.ingest`, `QueryEngine.query`, `Evaluator.evaluate`.
