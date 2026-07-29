@@ -397,6 +397,50 @@ async def test_purge_removes_a_namespace_and_is_idempotent(database: Database) -
 
 
 @pytest.mark.integration
+async def test_delete_document_removes_one_document_and_leaves_the_rest(
+    database: Database,
+) -> None:
+    """The consumer's delete path: its row and the chunks are no longer one table.
+
+    ADR-0002 dropped the foreign key that used to cascade, so this is the only thing
+    that removes a single document's chunks.
+    """
+    sage = _sage_over(database)
+    scope = Scope(namespace="acme")
+
+    kept = await sage.ingest(
+        RawSource(name="atp.md", content=b"The mitochondrion produces ATP in the cell.\n"), scope
+    )
+    doomed = await sage.ingest(
+        RawSource(name="paris.md", content=b"Paris is the capital of France.\n"), scope
+    )
+
+    await sage.delete_document(scope, doomed.document.id)
+    await sage.delete_document(scope, doomed.document.id)  # idempotent
+
+    assert (await sage.query("What is the capital of France?", scope)).outcome is Outcome.NOT_FOUND
+    survivor = await sage.query("What produces ATP?", scope)
+    assert survivor.outcome is Outcome.ANSWERED
+    assert kept.document.id != doomed.document.id
+
+
+@pytest.mark.integration
+async def test_delete_document_cannot_reach_another_namespace(database: Database) -> None:
+    """Scoped like everything else: naming another namespace's document is a no-op."""
+    sage = _sage_over(database)
+    acme, globex = Scope(namespace="acme"), Scope(namespace="globex")
+    body = b"The mitochondrion produces ATP in the cell.\n"
+
+    acme_result = await sage.ingest(RawSource(name="a.md", content=body), acme)
+    await sage.ingest(RawSource(name="b.md", content=body), globex)
+
+    # globex tries to delete acme's document by id.
+    await sage.delete_document(globex, acme_result.document.id)
+
+    assert (await sage.query("What produces ATP?", acme)).outcome is Outcome.ANSWERED
+
+
+@pytest.mark.integration
 async def test_one_namespace_cannot_read_another_through_the_facade(database: Database) -> None:
     sage = _sage_over(database)
     await sage.ingest(
