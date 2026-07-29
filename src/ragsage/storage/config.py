@@ -70,6 +70,18 @@ class PostgresConfig:
         this was extracted from — the consumer's ``app.user_id`` over its own
         tables, and this one over ragsage's — and they must not be confused. The
         default is ragsage-owned for exactly that reason.
+    embedding_dim:
+        The width of the ``embedding`` column. Fixed at table-creation time and
+        **pinned per corpus** — changing it invalidates every stored vector, so it
+        belongs in config rather than as a literal in the DDL. Must match whatever
+        the configured embedder actually returns.
+    text_search_config:
+        The Postgres text-search configuration the generated ``lexical`` column is
+        built with (``'english'`` was hardcoded in the consuming backend). It has
+        to be named explicitly because the two-argument form of ``to_tsvector`` is
+        the IMMUTABLE one, and a ``STORED`` generated column accepts nothing else —
+        the one-argument form depends on a session setting and is only STABLE.
+        Changing it requires rebuilding the column.
     pool_size, max_overflow:
         Pool sizing. Deliberately explicit and deliberately modest: ragsage's
         pool is a *second* pool reaching the same Postgres as the consumer's, and
@@ -83,6 +95,8 @@ class PostgresConfig:
     dsn: str
     app_role: str = "ragsage_app"
     isolation_variable: str = "ragsage.namespace"
+    embedding_dim: int = 1024
+    text_search_config: str = "english"
     pool_size: int = 5
     max_overflow: int = 5
     pool_pre_ping: bool = True
@@ -99,7 +113,19 @@ class PostgresConfig:
         # Fail here, where the mistake was made, rather than deep inside a query.
         safe_identifier(self.app_role)
         safe_setting_name(self.isolation_variable)
+        # Both reach the DDL as interpolated text — pgvector's type modifier and
+        # to_tsvector's first argument have no bind form — so both are guarded.
+        safe_identifier(self.text_search_config)
 
+        if self.embedding_dim < 1:
+            raise ValueError("PostgresConfig.embedding_dim must be a positive number of dimensions")
+        # pgvector's hard ceiling for an indexable column. Failing here beats a
+        # CREATE INDEX that succeeds on the table and then refuses the index.
+        if self.embedding_dim > 2000:
+            raise ValueError(
+                "PostgresConfig.embedding_dim must be at most 2000: pgvector cannot build an "
+                f"HNSW index on a wider column, and got {self.embedding_dim}"
+            )
         if self.pool_size < 1:
             raise ValueError("PostgresConfig.pool_size must be at least 1")
         if self.max_overflow < 0:

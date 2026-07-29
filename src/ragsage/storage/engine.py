@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ragsage.scope import Scope
 from ragsage.storage.config import PostgresConfig
+from ragsage.storage.schema import migrate
 from ragsage.storage.session import open_scoped_session
 
 
@@ -101,6 +102,15 @@ class Database:
         """
         async with self._engine.begin() as connection:
             yield connection
+
+    async def migrate(self) -> None:
+        """Create ragsage's table, indexes, role and RLS policy. Idempotent.
+
+        Safe to call on every start. Runs on an owner connection because only the
+        owner may issue this DDL — see :mod:`ragsage.storage.schema`.
+        """
+        async with self.owner_connection() as connection:
+            await migrate(connection, self._config)
 
     async def ping(self) -> bool:
         """Return True if a trivial round-trip to the database succeeds.
