@@ -7,10 +7,22 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 keywords = ["rag", "retrieval", "llm", "embeddings", "citations", "vector-search"]
 # The core was historically dependency-free; the heuristic parser (ragsage.parsing)
-# retires that. These are all pure-Python / pure-Rust and pull in no numpy>=2,
-# torch, or onnxruntime — so the library still runs on the deployment's
-# x86-64-v1 CPU. Token counting uses tiktoken, deliberately not transformers.
+# retired that, and the shipped provider adapters (ragsage.providers) go further:
+# per ADR-0002 they are core, not an extra, so `pip install ragsage` plus two API
+# keys is a working engine.
+#
+# The two halves have different constraints and must not be confused:
+#
+#   * The parser stack is pure-Python / pure-Rust and pulls no numpy>=2, torch,
+#     onnxruntime, transformers, or magika. That invariant is a deliberate
+#     portability promise (ADR-0001, amended) and is enforced against
+#     `ragsage.parsing`'s import graph by tests/test_dependency_guard.py. Token
+#     counting uses tiktoken, deliberately not transformers.
+#   * The provider SDKs do pull numpy 2.x and HuggingFace tokenizers (via
+#     voyageai). That is fine — they are confined to `ragsage.providers`, which
+#     nothing in the parser's or the top-level package's import graph touches.
 dependencies = [
+    # Parsing and chunking.
     "langchain-text-splitters>=0.3",
     "tiktoken>=0.8",
     "puremagic>=1.28",
@@ -20,6 +32,15 @@ dependencies = [
     "python-pptx>=1.0.2",
     "beautifulsoup4>=4.15.0",
     "lxml>=6.1.1",
+    # Provider adapters (ragsage.providers). The SDKs are named explicitly
+    # alongside their LangChain integrations, rather than left to arrive
+    # transitively, because they are what the adapters actually talk to.
+    "langchain-core>=1.0",
+    "langchain-openai>=1.4.1",
+    "langchain-voyageai>=0.4.0",
+    "openai>=2.0",
+    "voyageai>=0.3",
+    "pydantic>=2.0",
     # Storage (ADR-0002): ragsage owns its Postgres pool, so the async driver and
     # SQLAlchemy are core, not extras — `pip install ragsage` must yield a working
     # engine. Pinned to match the consuming backend so one deployment resolves a
@@ -74,4 +95,5 @@ addopts = "-ra --strict-markers"
 testpaths = ["tests"]
 markers = [
     "integration: talks to a real Postgres (skipped unless TEST_DATABASE_URL is set)",
+    "live_providers: talks to the real Voyage/OpenAI APIs (skipped unless RAGSAGE_LIVE_PROVIDERS=1 and keys are set)",
 ]
