@@ -343,6 +343,20 @@ class RagSage:
 
     # -- deletion ----------------------------------------------------------
 
+    async def delete_document(self, scope: Scope, document_id: str) -> None:
+        """Remove one document's chunks from ``scope``. Idempotent.
+
+        The consumer's own delete path needs this: its lifecycle row and the chunks
+        now live in different tables on different connections, so deleting the row
+        no longer takes the chunks with it. All three stores address the same rows,
+        so this drives them together rather than leaving the caller to guess which
+        one owns the purge.
+        """
+        async with self._database.session(scope) as session:
+            await self._stores.vector_store(session).delete(scope, document_id)
+            await self._stores.lexical_store(session).delete(scope, document_id)
+            await self._stores.document_store(session).delete(scope, document_id)
+
     async def purge(self, scope: Scope) -> None:
         """Delete every chunk in ``scope``'s namespace. Idempotent.
 
