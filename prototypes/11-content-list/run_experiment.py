@@ -18,17 +18,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from arm_a import (  # noqa: E402
+from arm_a import (
     ItemIngestionPrototype,
     chunk_summary,
     looks_like_a_table,
     metadata_keys,
 )
-from items import SAMPLE_CONTENT_LIST, normalise  # noqa: E402
-from ragsage import IngestionConfig, QueryEngine, Scope  # noqa: E402
-from ragsage.fakes import FakeEngineKit  # noqa: E402
-from ragsage.models import Document  # noqa: E402
-from ragsage.parsing.backend import HeuristicBackend  # noqa: E402
+from items import SAMPLE_CONTENT_LIST, normalise
+
+from ragsage import IngestionConfig, QueryEngine, Scope
+from ragsage.fakes import FakeEngineKit
+from ragsage.models import Document
+from ragsage.parsing.backend import HeuristicBackend
 
 CONFIG = IngestionConfig(chunk_size=512, chunk_overlap=64, contextualize=False)
 QUESTION = "What is the tariff rate for lunar injection?"
@@ -70,7 +71,7 @@ async def main() -> None:
     try:
         backend.chunk(doc, pages, size=512, overlap=64)
         print("  (no error — unexpected)")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"  HeuristicBackend.chunk(...) without parse() -> {type(exc).__name__}: {exc}")
     print(
         "  The shipped Chunker (backend.py:128) pops an in-flight stash keyed by\n"

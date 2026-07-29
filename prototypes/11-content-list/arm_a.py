@@ -26,6 +26,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from items import ContentItem
+
 from ragsage.config import IngestionConfig
 from ragsage.models import Chunk, Document, EmbeddedChunk, Page
 from ragsage.parsing.chunking import chunk_markdown, make_token_counter, normalize_newlines
@@ -120,11 +121,19 @@ class ItemIngestionPrototype:
         re-id-ing chunks after the fact.
         """
         chunks: list[Chunk] = []
+        headings: list[str] = []
         for item in items:
             rendered = item.to_markdown()
             if not rendered:
                 continue
+            _track_headings(headings, rendered)
             metadata: dict[str, object] = {"block_type": item.type}
+            # Chunking per item makes the structural pass item-scoped, so a table
+            # item never sees the heading a preceding text item carried. The seam
+            # restores the full document-scoped path from a running stack — a fix
+            # that lives at the boundary, needing no model change.
+            if headings:
+                metadata["headings"] = list(headings)
             if item.caption():
                 metadata["caption"] = item.caption()
             if item.footnote():
@@ -179,6 +188,20 @@ class ItemIngestionPrototype:
         await self._lexical.index(scope, final)  # type: ignore[attr-defined]
         await self._documents.save(scope, document, final)  # type: ignore[attr-defined]
         return final
+
+
+def _track_headings(stack: list[str], markdown: str) -> None:
+    """Advance a document-scoped ATX heading stack over one item's Markdown."""
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("#"):
+            continue
+        hashes = len(stripped) - len(stripped.lstrip("#"))
+        title = stripped[hashes:].strip()
+        if not title or hashes > 6:
+            continue
+        del stack[hashes - 1 :]
+        stack.append(title)
 
 
 def metadata_keys(chunks: Sequence[Chunk]) -> set[str]:

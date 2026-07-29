@@ -1,0 +1,207 @@
+diff --git a/src/ragsage/models.py b/src/ragsage/models.py
+index f24f1bd..f43c73f 100644
+--- a/src/ragsage/models.py
++++ b/src/ragsage/models.py
+@@ -90,6 +90,35 @@ class PageLayout:
+     bitmap_area: float = 0.0
+ 
+ 
++class BlockType(enum.StrEnum):
++    """What kind of thing a block is — the typed-block widening (ARM B, prototype)."""
++
++    TEXT = "text"
++    TABLE = "table"
++    IMAGE = "image"
++    EQUATION = "equation"
++    GENERIC = "generic"
++
++
++@dataclass(frozen=True)
++class Block:
++    """One typed block of a page (ARM B, prototype).
++
++    ``markdown`` is the block's rendering — the same string arm (a) would have
++    concatenated — with ``type``, ``caption`` and ``footnote`` kept beside it
++    instead of inlined into it.
++    """
++
++    type: BlockType | str
++    markdown: str
++    caption: str = ""
++    footnote: str = ""
++    metadata: Mapping[str, object] = field(default_factory=dict)
++
++    def __post_init__(self) -> None:
++        object.__setattr__(self, "metadata", _freeze(self.metadata))
++
++
+ @dataclass(frozen=True)
+ class Page:
+     """One page as the parser found it, before routing decides how to read it.
+@@ -106,6 +135,7 @@ class Page:
+     text: str = ""
+     image: PageImage | None = None
+     layout: PageLayout | None = None
++    blocks: Sequence[Block] = ()  # ARM B
+ 
+ 
+ class PageRoute(enum.StrEnum):
+@@ -169,6 +199,9 @@ class Chunk:
+     ordinal: int
+     embed_text: str = ""
+     metadata: Mapping[str, object] = field(default_factory=dict)
++    block_type: BlockType | str | None = None  # ARM B
++    caption: str = ""  # ARM B
++    footnote: str = ""  # ARM B
+ 
+     def __post_init__(self) -> None:
+         object.__setattr__(self, "metadata", _freeze(self.metadata))
+diff --git a/src/ragsage/parsing/backend.py b/src/ragsage/parsing/backend.py
+index 74300a5..ca3cbde 100644
+--- a/src/ragsage/parsing/backend.py
++++ b/src/ragsage/parsing/backend.py
+@@ -27,9 +27,10 @@ from __future__ import annotations
+ import importlib
+ from collections.abc import Callable, Sequence
+ 
+-from ragsage.models import Chunk, Document, Page, ParsedDocument, RawSource
++from ragsage.models import Block, BlockType, Chunk, Document, Page, ParsedDocument, RawSource
+ from ragsage.parsing.chunking import (
+     TokenCounter,
++    chunk_blocks,
+     chunk_markdown,
+     make_token_counter,
+     normalize_newlines,
+@@ -95,7 +96,14 @@ class HeuristicBackend:
+         fmt = route(source, content)
+         if fmt is DocumentFormat.TEXT:
+             markdown = normalize_newlines(content.decode("utf-8", "replace"))
+-            return [Page(number=_FLOW_FORMAT_PAGE, text=markdown, layout=None)]
++            return [
++                Page(
++                    number=_FLOW_FORMAT_PAGE,
++                    text=markdown,
++                    layout=None,
++                    blocks=_text_blocks(markdown),  # ARM B
++                )
++            ]
+         if fmt is DocumentFormat.UNKNOWN:
+             raise ValueError(f"unrecognised document format for source {source.name!r}")
+         return _format_parser(fmt)(source, content)
+@@ -127,6 +135,19 @@ class HeuristicBackend:
+         count_tokens = self._token_counter()
+         chunks: list[Chunk] = []
+         for page in pages:
++            if page.blocks:  # ARM B: block-aware path
++                chunks.extend(
++                    chunk_blocks(
++                        page.blocks,
++                        document_id=document.id,
++                        page=page.number,
++                        size=size,
++                        overlap=overlap,
++                        count_tokens=count_tokens,
++                        start_ordinal=len(chunks),
++                    )
++                )
++                continue
+             page_chunks = chunk_markdown(
+                 normalize_newlines(page.text),
+                 document_id=document.id,
+@@ -162,3 +183,23 @@ def _format_parser(fmt: DocumentFormat) -> FormatParser:
+         ) from exc
+     parser: FormatParser = getattr(module, func_name)
+     return parser
++
++
++def _text_blocks(markdown: str) -> list[Block]:
++    """ARM B: the plain-text path's blocks.
++
++    The heuristic parser has no typed-block model of its own — it produces one
++    Markdown string per page. To fill ``Page.blocks`` at all it must re-derive
++    blocks from that string, i.e. re-run the very heuristic the block type was
++    supposed to replace. Four other format paths (pdf, docx, pptx, html) need the
++    same treatment before ``Page.blocks`` is ever non-empty in production.
++    """
++    from ragsage.parsing.chunking import _blocks
++
++    return [
++        Block(
++            type=BlockType.TABLE if kind == "table" else BlockType.TEXT,
++            markdown=text,
++        )
++        for kind, text in _blocks(markdown)
++    ]
+diff --git a/src/ragsage/parsing/chunking.py b/src/ragsage/parsing/chunking.py
+index 68e2c5d..320161f 100644
+--- a/src/ragsage/parsing/chunking.py
++++ b/src/ragsage/parsing/chunking.py
+@@ -24,7 +24,7 @@ from __future__ import annotations
+ import re
+ from collections.abc import Callable, Sequence
+ 
+-from ragsage.models import Chunk
++from ragsage.models import Block, Chunk
+ 
+ TokenCounter = Callable[[str], int]
+ """Counts the tokens in a string — the length function the size pass bounds against."""
+@@ -115,6 +115,59 @@ def chunk_markdown(
+     return chunks
+ 
+ 
++def chunk_blocks(
++    blocks: Sequence[Block],
++    *,
++    document_id: str,
++    page: int,
++    size: int,
++    overlap: int,
++    count_tokens: TokenCounter,
++    start_ordinal: int = 0,
++) -> list[Chunk]:
++    """ARM B: chunk a page's typed blocks, carrying each block's type onto its chunks.
++
++    A second entry point beside :func:`chunk_markdown`, because a block-aware
++    chunker cannot reuse the Markdown one: the structural pass splits on headings
++    *across* the whole page, which re-fuses blocks the parser had already
++    separated. So the block path splits per block and loses ``_pack``'s merging
++    of small neighbouring units — the same trade arm (a2) makes, reached by a
++    longer road.
++
++    It also inherits a second source of truth: :func:`_blocks` still sniffs
++    Markdown for tables, so a block declared ``TABLE`` whose markdown does not
++    look like one (and vice versa) now has two disagreeing answers.
++    """
++    chunks: list[Chunk] = []
++    ordinal = start_ordinal
++    for block in blocks:
++        produced = chunk_markdown(
++            block.markdown,
++            document_id=document_id,
++            page=page,
++            size=size,
++            overlap=overlap,
++            count_tokens=count_tokens,
++            start_ordinal=ordinal,
++        )
++        for chunk in produced:
++            chunks.append(
++                Chunk(
++                    id=chunk.id,
++                    document_id=chunk.document_id,
++                    text=chunk.text,
++                    page=chunk.page,
++                    ordinal=chunk.ordinal,
++                    metadata=chunk.metadata,
++                    block_type=block.type,
++                    caption=block.caption,
++                    footnote=block.footnote,
++                )
++            )
++        ordinal += len(produced)
++    return chunks
++
++
+ def _sections(markdown: str) -> list[tuple[list[str], str]]:
+     """Pass 1: split on headings into ``(heading_path, section_body)`` pairs.
+ 
