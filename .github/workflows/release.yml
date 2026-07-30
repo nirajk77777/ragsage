@@ -72,3 +72,63 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Runs only after PyPI has actually accepted the upload, so a GitHub release never
+  # advertises a version nobody can install.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and attach the artifacts
+    steps:
+      # Wanted for the notes file and for --generate-notes, which reads history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The same artifacts PyPI received, byte for byte — they are the build job's
+      # output, not a rebuild, so the attachments cannot drift from the release.
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # Re-running a release workflow must not silently rewrite notes a human has
+          # since edited on the release page. Refresh the assets and leave prose alone.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::release $TAG already exists — refreshing assets, leaving notes untouched"
+            gh release upload "$TAG" dist/* --clobber
+            exit 0
+          fi
+
+          # Hand-written notes win when they exist; otherwise GitHub generates them
+          # from the commits since the last tag. The escape hatch matters because the
+          # generated notes are a commit list, which is the right summary for a patch
+          # release and the wrong one for a release that needs explaining.
+          notes=(--generate-notes)
+          if [ -f "docs/release-notes/${TAG}.md" ]; then
+            notes=(--notes-file "docs/release-notes/${TAG}.md")
+          fi
+
+          # A PEP 440 pre-release (1.0.0rc1, 0.2.0a1, 0.3.0.dev1) is not the version a
+          # newcomer should land on, so it is flagged and does not move "Latest".
+          version="${TAG#v}"
+          if printf '%s' "$version" | grep -Eq '[0-9](a|b|rc)[0-9]+|\.dev[0-9]+'; then
+            channel=(--prerelease)
+          else
+            channel=(--latest)
+          fi
+
+          # --verify-tag: refuse to invent a tag if the ref ever arrives malformed.
+          gh release create "$TAG" dist/* \
+            --title "$TAG" \
+            --verify-tag \
+            "${notes[@]}" \
+            "${channel[@]}"

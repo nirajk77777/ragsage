@@ -34,17 +34,44 @@ GitHub repo is public.
 
 1. Bump `version` in `pyproject.toml`. The workflow refuses to publish a tag that
    disagrees with it, so this is the single source of truth.
-2. Commit, push to `main`, and let CI go green.
-3. Tag and push:
+2. *Optional* — write `docs/release-notes/v<version>.md`. See "Release notes" below.
+3. Commit, push to `main`, and let CI go green.
+4. Tag and push:
 
    ```console
    $ git tag v0.1.0
    $ git push origin v0.1.0
    ```
 
-4. Watch the run (`gh run watch`). The `build` job re-runs the full gate set — ruff, mypy,
-   pytest, and the tag/version check — before the `publish` job, which is the only job
-   holding the OIDC credential and runs no project code.
+5. Watch the run (`gh run watch`). Three jobs, in order:
+
+   | Job | Does | Holds |
+   | --- | --- | --- |
+   | `build` | ruff, mypy, pytest, tag/version check, `uv build` | nothing |
+   | `publish` | uploads to PyPI | the OIDC credential, and runs no project code |
+   | `github-release` | creates the GitHub release, attaches the artifacts | `contents: write` |
+
+   `github-release` runs only after PyPI accepts the upload, so a GitHub release never
+   advertises a version nobody can install. The attached files are the `build` job's own
+   output rather than a rebuild, so they cannot drift from what PyPI serves.
+
+## Release notes
+
+`github-release` picks notes in this order:
+
+1. **`docs/release-notes/v<version>.md`**, if it exists — verbatim.
+2. Otherwise **`--generate-notes`**, which is GitHub's commit-and-PR list since the last
+   tag.
+
+The generated list is the right summary for a patch release and the wrong one for a
+release that needs explaining, which is why the file is the override rather than the only
+option. [`v0.1.0.md`](release-notes/v0.1.0.md) is the worked example.
+
+A tag carrying a PEP 440 pre-release segment — `v1.0.0rc1`, `v0.2.0a1`, `v0.3.0.dev1` — is
+marked pre-release and does *not* move GitHub's "Latest", matching how PyPI treats it.
+
+Re-running a release workflow on an existing tag **refreshes the attached assets and
+leaves the notes alone**, so prose edited on the release page survives.
 
 ## Checking the result
 
