@@ -158,7 +158,8 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
             else:
                 vision = result.route_counts.get(ragsage.PageRoute.VISION, 0)
                 suffix = f", {vision} via vision" if vision else ""
-                print(f"  + {source.name}: {result.chunk_count} chunks{suffix}")
+                noun = "chunk" if result.chunk_count == 1 else "chunks"
+                print(f"  + {source.name}: {result.chunk_count} {noun}{suffix}")
 
     asyncio.run(run())
     _save_kit(kit, store)
