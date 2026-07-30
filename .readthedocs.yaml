@@ -1,0 +1,34 @@
+# Read the Docs build configuration.
+#
+# The site is Sphinx (docs/conf.py) with MyST, so the Markdown already in docs/ —
+# the ADRs, the failure-mode catalogue, the measurements — are the pages, and the
+# API reference is generated from the docstrings in src/.
+#
+# https://docs.readthedocs.com/platform/stable/config-file/v2.html
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    # 3.12 rather than a newer interpreter, to match `requires-python` and the
+    # version CI tests on: the docs build imports the package, so it should import
+    # it under the same interpreter everything else uses.
+    python: "3.12"
+
+# uv is supported natively here, so the docs build resolves from the committed
+# uv.lock exactly as a developer and CI do — no second, drifting dependency list.
+# `uv sync` installs the project itself too, which autodoc needs in order to import
+# `ragsage` and read its docstrings.
+python:
+  install:
+    - method: uv
+      command: sync
+      groups:
+        - docs
+
+sphinx:
+  configuration: docs/conf.py
+  # A broken cross-reference or a missing toctree entry fails the build rather than
+  # shipping a dead link. The same `-W` gate runs in CI, so this should never be the
+  # first place a docs problem is discovered.
+  fail_on_warning: true

@@ -7,8 +7,8 @@ CLI, or a test) supplies an adapter for each; the pipelines in
 :mod:`ragsage.ingestion` and :mod:`ragsage.query` orchestrate them and nothing
 else.
 
-They are :class:`typing.Protocol`s on purpose: an adapter conforms by shape, so
-it need not import or subclass anything from ``ragsage``. That keeps the
+Every one is a :class:`typing.Protocol` on purpose: an adapter conforms by shape,
+so it need not import or subclass anything from ``ragsage``. That keeps the
 dependency arrow pointing strictly inward — adapters know about the engine, the
 engine never knows about them.
 

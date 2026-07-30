@@ -10,6 +10,9 @@ venv/
 dist/
 build/
 
+# Sphinx output. Read the Docs builds this itself from .readthedocs.yaml.
+docs/_build/
+
 # Env / secrets
 .env
 .env.*

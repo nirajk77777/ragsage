@@ -111,6 +111,20 @@ dev = [
     "reportlab>=5.0.0",
 ]
 
+# Documentation. Sphinx rather than MkDocs because the docstrings are already
+# written in Sphinx's dialect — 200-odd `:class:`/`:meth:`/`:mod:` cross-references
+# and numpydoc `Parameters` sections — which mkdocstrings would render as literal
+# text. MyST keeps the prose (ADRs, failure modes) in Markdown regardless.
+#
+# Not in `dev`: a docs build pulls Sphinx and its tree for no benefit to someone
+# running the tests. Read the Docs and CI ask for it by name (`--group docs`).
+docs = [
+    "sphinx>=8.1",
+    "furo>=2024.8.6",
+    "myst-parser>=4.0",
+    "sphinx-copybutton>=0.5.2",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100

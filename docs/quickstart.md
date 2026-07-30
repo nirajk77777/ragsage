@@ -1,0 +1,186 @@
+# Quickstart
+
+Python 3.12 or newer.
+
+```bash
+pip install ragsage
+```
+
+## Offline, with no API key
+
+Every port ships with a working in-memory implementation, so the full loop runs with no
+database, no server and no credentials. The bundled CLI wires nothing but ports and fakes:
+
+```console
+$ ragsage ingest ./docs
+  + france.txt: 1 chunk
+corpus saved to .ragsage/state.json
+
+$ ragsage query "What is the capital of France?"
+Paris is the capital of France. It sits on the Seine river. [1]
+
+Sources:
+  [1] 36ad5ede1a879836 (page 1)
+
+$ ragsage query "Who won the 1998 World Cup final?"
+I couldn't find an answer to that in your documents.
+```
+
+That last answer is the contract, not a failure: the corpus can't support the question, so
+the engine says so instead of inventing something.
+
+The same thing in about ten lines of wiring — this is
+[`examples/fakes_end_to_end.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/fakes_end_to_end.py),
+trimmed:
+
+```python
+import asyncio
+
+from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
+from ragsage.fakes import FakeEngineKit
+
+
+async def main() -> None:
+    kit = FakeEngineKit()  # one instance of every fake, sharing its stores
+    scope = Scope(namespace="local")
+
+    pipeline = IngestionPipeline(
+        parser=kit.parser,
+        classifier=kit.classifier,
+        chunker=kit.chunker,
+        contextualizer=kit.contextualizer,
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        document_store=kit.document_store,
+        llm=kit.llm,
+    )
+    engine = QueryEngine(
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        reranker=kit.reranker,
+        llm=kit.llm,
+    )
+
+    document = b"Paris is the capital of France. It sits on the Seine river."
+    await pipeline.ingest(RawSource(name="france.txt", content=document), scope)
+
+    answer = await engine.query("What is the capital of France?", scope)
+    print(answer.text, answer.outcome, answer.grounded)
+
+
+asyncio.run(main())
+```
+
+## With real models and a real database
+
+`RagSage` assembles the twelve adapters the two façades need from one config object. It wants
+a Postgres with the `vector` extension and two API keys:
+
+```python
+import asyncio
+import os
+
+from ragsage import RawSource, Scope
+from ragsage.providers import ProviderConfig
+from ragsage.sage import RagSage, RagSageConfig
+from ragsage.storage import PostgresConfig
+
+
+async def main() -> None:
+    sage = RagSage.from_config(
+        RagSageConfig(
+            postgres=PostgresConfig(dsn=os.environ["DATABASE_URL"]),
+            providers=ProviderConfig(
+                openai_api_key=os.environ["OPENAI_API_KEY"],
+                voyage_api_key=os.environ["VOYAGE_API_KEY"],
+            ),
+        )
+    )
+    await sage.migrate()  # idempotent: safe on every boot
+
+    scope = Scope(namespace="acme-corp")
+    await sage.ingest(RawSource(name="handbook.pdf", path="./handbook.pdf"), scope)
+
+    answer = await sage.query("How much parental leave do we get?", scope)
+    print(answer.text)
+    for citation in answer.citations:
+        print(f"[{citation.marker}] {citation.document_id} page {citation.page}")
+
+    await sage.dispose()
+
+
+asyncio.run(main())
+```
+
+`ragsage.sage` is deliberately **not** re-exported from the top-level package: importing it
+pulls SQLAlchemy, asyncpg and the provider SDKs, and `import ragsage` is guaranteed to stay
+free of that stack. Reach for it by name.
+
+Note what the config does *not* do: read the environment. The script above does that, and
+passes values in. The library never touches {mod}`os` on your behalf, anywhere — see
+[ADR-0002](adr/0002-ragsage-owns-its-storage.md).
+
+## Streaming
+
+{meth}`~ragsage.sage.RagSage.stream` yields tokens, then resolved citations, then usage, then
+one terminal event — the shape a server relays over SSE. The scoped database session is held
+open for the whole stream and released even if the consumer abandons it early:
+
+```python
+from ragsage import AnswerComplete, AnswerToken, Citation, Usage
+
+async for event in sage.stream("How much parental leave do we get?", scope):
+    match event:
+        case AnswerToken(text=text):
+            print(text, end="", flush=True)
+        case Citation() as citation:
+            print(f"\n[{citation.marker}] {citation.document_id} p{citation.page}")
+        case Usage(sources=sources):
+            print(f"\n{sources} sources in context")
+        case AnswerComplete() as done:
+            print(f"\ndone: {done.outcome}")
+```
+
+## Bringing your own adapter
+
+The ports are {class}`~typing.Protocol`s, so an adapter conforms by *shape* — it imports and
+subclasses nothing from ragsage:
+
+```python
+from collections.abc import Sequence
+from dataclasses import replace
+
+from ragsage.sage import ComputeKit, RagSage
+
+
+class MyEmbedder:
+    async def embed(self, texts: Sequence[str]) -> Sequence[tuple[float, ...]]: ...
+
+
+compute = replace(ComputeKit.from_config(config), embedder=MyEmbedder())
+sage = RagSage.from_config(config, compute=compute)
+```
+
+`stores=` swaps persistence the same way, and `database=` shares a connection pool with your
+own application. Outgrown the assembler? {class}`~ragsage.ingestion.IngestionPipeline` and
+{class}`~ragsage.query.QueryEngine` stay directly constructible, and
+{meth}`~ragsage.sage.RagSage.pipeline_for` / {meth}`~ragsage.sage.RagSage.engine_for` are
+public so you reach past the façade instead of forking it.
+
+## The runnable examples
+
+Four scripts in the repository, argument-free, type-checked *and executed* in CI:
+
+| Script | What it shows |
+|---|---|
+| [`fakes_end_to_end.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/fakes_end_to_end.py) | The whole loop against the fakes, including the honest not-found path. |
+| [`custom_embedder.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_embedder.py) | Implementing {class}`~ragsage.ports.Embedder` against something that isn't Voyage. |
+| [`custom_parser.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_parser.py) | Implementing {class}`~ragsage.ports.DocumentParser` for a format the built-in backend doesn't understand. |
+| [`assembled_engine.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/assembled_engine.py) | `RagSage.from_config(...)` end to end. Wants a Postgres; skips with a message without one. |
+
+## Next
+
+- [API reference](api/index.md) — every façade, port, model and adapter.
+- [Failure modes](failure-modes.md) — when an answer looks wrong, check the parser first.

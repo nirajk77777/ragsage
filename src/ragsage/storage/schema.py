@@ -113,8 +113,8 @@ def role_statements(config: PostgresConfig) -> tuple[str, ...]:
     """Create the non-privileged role if absent, and grant it row access.
 
     The role is created with ``NOLOGIN``: it is a privilege context the owner
-    ``SET LOCAL ROLE``s into, never a login identity, so giving it a password
-    would only widen the attack surface.
+    switches into with ``SET LOCAL ROLE``, never a login identity, so giving it a
+    password would only widen the attack surface.
 
     ``CREATE ROLE`` has no ``IF NOT EXISTS``, hence the ``DO`` block — the one
     piece of PL/pgSQL here, and only because the alternative is failing on the

@@ -60,9 +60,9 @@ class PostgresConfig:
         :func:`~ragsage.storage.session.open_scoped_session`).
     app_role:
         The non-privileged Postgres role scoped work runs under. Not a login
-        identity: it is a privilege context the owner ``SET LOCAL ROLE``s into so
-        RLS is actually enforced. Reaches interpolated SQL, so it is guarded as a
-        plain identifier.
+        identity: it is a privilege context the owner switches into with
+        ``SET LOCAL ROLE`` so RLS is actually enforced. Reaches interpolated SQL,
+        so it is guarded as a plain identifier.
     isolation_variable:
         The run-time setting carrying ``Scope.namespace`` for the duration of a
         transaction, and the value ragsage's RLS policy compares rows against.

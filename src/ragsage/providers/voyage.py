@@ -44,11 +44,11 @@ class VoyageReranker:
 
     Each candidate is handed to Voyage as a :class:`~langchain_core.documents.Document`
     tagged with its position in the input list; the reranked replies carry that tag
-    and a ``relevance_score`` back, so the adapter rebuilds :class:`ScoredChunk`s
-    from its *own* candidates by index — the model only ever sees text, never the
-    engine's chunk identities. A reply whose tag is missing or out of range is
-    dropped rather than trusted, so a malformed response can never mislabel a
-    citation. The client scores every candidate (it was built with ``top_k=None``);
+    and a ``relevance_score`` back, so the adapter rebuilds the
+    :class:`ScoredChunk` list from its *own* candidates by index — the model only
+    ever sees text, never the engine's chunk identities. A reply whose tag is
+    missing or out of range is dropped rather than trusted, so a malformed
+    response can never mislabel a citation. The client scores every candidate (it was built with ``top_k=None``);
     the port's per-call ``top_k`` is applied here.
     """
 

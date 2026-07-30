@@ -1,7 +1,7 @@
 """The two-pass, structure-aware Markdown chunker shared by every format path.
 
 Every real parse path serialises its document to Markdown; this module turns that
-Markdown into token-bounded :class:`~ragsage.models.Chunk`s that keep tables whole
+Markdown into token-bounded :class:`~ragsage.models.Chunk` objects that keep tables whole
 and carry their heading context — the same properties Docling's ``HybridChunker``
 gave us, done in pure Python with no ML dependency.
 

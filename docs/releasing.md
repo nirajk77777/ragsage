@@ -1,6 +1,6 @@
 # Releasing ragsage to PyPI
 
-Releases are published by [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+Releases are published by [`.github/workflows/release.yml`](https://github.com/nirajk77777/ragsage/blob/main/.github/workflows/release.yml)
 when a `v*` tag is pushed. No API token exists anywhere: PyPI authenticates the workflow
 itself through OIDC ([Trusted Publishing](https://docs.pypi.org/trusted-publishers/)).
 
@@ -65,7 +65,9 @@ GitHub repo is public.
 
 The generated list is the right summary for a patch release and the wrong one for a
 release that needs explaining, which is why the file is the override rather than the only
-option. [`v0.1.0.md`](release-notes/v0.1.0.md) is the worked example.
+option.
+[`v0.1.0.md`](https://github.com/nirajk77777/ragsage/blob/main/docs/release-notes/v0.1.0.md)
+is the worked example.
 
 A tag carrying a PEP 440 pre-release segment — `v1.0.0rc1`, `v0.2.0a1`, `v0.3.0.dev1` — is
 marked pre-release and does *not* move GitHub's "Latest", matching how PyPI treats it.

@@ -39,3 +39,24 @@ jobs:
           uv run python examples/custom_embedder.py
           uv run python examples/custom_parser.py
           uv run python examples/assembled_engine.py
+
+  # The docs site (Read the Docs builds the same tree from .readthedocs.yaml). Its
+  # own job: the docs group pulls Sphinx and its dependency tree, which has no
+  # business slowing down the gate that has to pass on every push.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - run: uv sync --locked --group docs
+
+      # -W: a broken :class: target, a page missing from a toctree, or a malformed
+      # docstring fails here rather than shipping a dead link. Read the Docs runs
+      # with fail_on_warning too, so this is the earlier of two identical gates.
+      - name: Build the docs
+        run: uv run sphinx-build -W -b html docs docs/_build/html
