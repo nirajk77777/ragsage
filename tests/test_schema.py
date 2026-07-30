@@ -14,11 +14,19 @@ Postgres: two namespaces, one table, a query with no owner predicate at all.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from sqlalchemy import text
 
 from ragsage.scope import Scope
-from ragsage.storage import Database, PostgresConfig
+from ragsage.storage import (
+    Database,
+    PostgresConfig,
+    SchemaMismatch,
+    existing_embedding_dim,
+    migrate,
+)
 from ragsage.storage.schema import (
     POLICY,
     TABLE,
@@ -253,3 +261,68 @@ async def test_the_lexical_column_is_generated_by_the_database(database: Databas
 
     assert matched == 1
     assert stemmed == 1, "to_tsvector should stem 'produce'/'producing' together"
+
+
+@pytest.mark.integration
+async def test_migrating_at_a_different_embedding_width_fails_loudly(
+    database: Database,
+) -> None:
+    """``CREATE TABLE IF NOT EXISTS`` would accept this silently; migrate() must not.
+
+    The failure it replaces is nasty: the width disagreement surfaces at the first
+    insert, after a document has been parsed and embedded, as a driver-level
+    "expected N dimensions, not M" with nothing pointing at the config that caused it.
+    """
+    wrong = replace(database.config, embedding_dim=database.config.embedding_dim + 1)
+
+    with pytest.raises(SchemaMismatch, match=r"embedding_dim"):
+        async with database.owner_connection() as connection:
+            await migrate(connection, wrong)
+
+
+@pytest.mark.integration
+async def test_the_mismatch_error_names_both_widths_and_the_way_out(
+    database: Database,
+) -> None:
+    """An error a reader can act on without opening the source."""
+    actual = database.config.embedding_dim
+    wrong = replace(database.config, embedding_dim=384)
+
+    with pytest.raises(SchemaMismatch) as raised:
+        async with database.owner_connection() as connection:
+            await migrate(connection, wrong)
+
+    message = str(raised.value)
+    assert f"vector({actual})" in message
+    assert "384" in message
+    assert "re-index" in message
+
+
+@pytest.mark.integration
+async def test_a_matching_width_still_migrates(database: Database) -> None:
+    """The guard must not make the ordinary re-migration path fail."""
+    async with database.owner_connection() as connection:
+        await migrate(connection, database.config)
+        assert await existing_embedding_dim(connection) == database.config.embedding_dim
+
+
+@pytest.mark.integration
+async def test_the_width_is_unknown_before_the_table_exists(database: Database) -> None:
+    """A fresh database has nothing to disagree with, so the guard must stay quiet.
+
+    This is the one test that drops the table, so it restores it at the fixture's own
+    width on the way out. Without that, every later test's fixture ``migrate()``
+    would hit the very :class:`SchemaMismatch` this file is about — an
+    order-dependent failure that looks like a bug in whatever ran next.
+    """
+    try:
+        async with database.owner_connection() as connection:
+            await connection.execute(text(f"DROP TABLE {TABLE}"))
+            assert await existing_embedding_dim(connection) is None
+            # …and on a fresh table, any width is accepted.
+            await migrate(connection, replace(database.config, embedding_dim=384))
+            assert await existing_embedding_dim(connection) == 384
+    finally:
+        async with database.owner_connection() as connection:
+            await connection.execute(text(f"DROP TABLE IF EXISTS {TABLE}"))
+            await migrate(connection, database.config)

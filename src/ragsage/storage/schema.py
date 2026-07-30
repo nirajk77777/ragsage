@@ -169,12 +169,65 @@ def migration_statements(config: PostgresConfig) -> tuple[str, ...]:
     )
 
 
+class SchemaMismatch(RuntimeError):
+    """An existing table disagrees with the config it is being migrated against.
+
+    Raised instead of letting :func:`migrate` succeed misleadingly. ``CREATE TABLE IF
+    NOT EXISTS`` is a no-op on a table that already exists, so it silently accepts a
+    config whose ``embedding_dim`` differs from the column that is really there —
+    and the disagreement then surfaces at the first insert, thousands of parsed
+    tokens later, as ``expected 1024 dimensions, not 384`` from deep inside the
+    driver. Failing at ``migrate()`` puts the error where the mistake is.
+    """
+
+
+async def existing_embedding_dim(connection: AsyncConnection) -> int | None:
+    """The width of the live ``embedding`` column, or ``None`` if there is no table.
+
+    Read from ``pg_attribute.atttypmod``, which for a pgvector column *is* the
+    declared dimension (unlike ``varchar``, it carries no length offset). ``-1``
+    means the column was declared unsized as bare ``vector``, which no ragsage
+    migration produces — treated as unknown rather than as a mismatch, so a table
+    created by something else is not condemned on this evidence alone.
+    """
+    typmod = await connection.scalar(
+        text(
+            "SELECT a.atttypmod FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE c.relname = :table AND a.attname = 'embedding' "
+            "  AND n.nspname = current_schema() "
+            "  AND a.attnum > 0 AND NOT a.attisdropped"
+        ),
+        {"table": TABLE},
+    )
+    if typmod is None or int(typmod) < 0:
+        return None
+    return int(typmod)
+
+
 async def migrate(connection: AsyncConnection, config: PostgresConfig) -> None:
     """Create the table, indexes, role and policy. Idempotent.
 
     Takes an owner connection rather than a :class:`~ragsage.storage.engine.Database`
     so a consumer already holding one — running this inside a wider startup
     transaction, say — is not forced to open a second.
+
+    Raises :class:`SchemaMismatch` if the table already exists at a different
+    ``embedding_dim``. That check runs *first*, before any DDL: a caller who has
+    misconfigured the width should not have indexes rebuilt or a policy recreated
+    on the way to being told so.
     """
+    actual = await existing_embedding_dim(connection)
+    if actual is not None and actual != config.embedding_dim:
+        raise SchemaMismatch(
+            f"{TABLE}.embedding is vector({actual}) but PostgresConfig.embedding_dim "
+            f"is {config.embedding_dim}. pgvector fixes a column's width at creation "
+            f"and the HNSW index depends on it, so this is not something migrate() "
+            f"can widen in place — the embedding model is pinned per corpus. Either "
+            f"set embedding_dim={actual} to match the corpus, or re-index: drop "
+            f"{TABLE} and re-ingest with the new model."
+        )
+
     for statement in migration_statements(config):
         await connection.execute(text(statement))

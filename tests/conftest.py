@@ -23,7 +23,7 @@ from sqlalchemy import text
 
 from ragsage import IngestionPipeline, QueryEngine, Scope
 from ragsage.fakes import FakeEngineKit
-from ragsage.storage import TABLE, Database, PostgresConfig
+from ragsage.storage import TABLE, Database, PostgresConfig, SchemaMismatch
 
 #: Deliberately tiny. These tests assert on isolation and SQL, never on retrieval
 #: quality, and an 8-wide vector keeps fixtures readable.
@@ -97,7 +97,17 @@ async def database(postgres_config: PostgresConfig) -> AsyncIterator[Database]:
     and the policy survive, which is what a real deployment looks like.
     """
     db = Database(postgres_config)
-    await db.migrate()
+    try:
+        await db.migrate()
+    except SchemaMismatch:
+        # The test database is throwaway and this fixture owns its schema, so a
+        # left-over table at another width is recreated rather than reported. In
+        # production that mismatch must fail loudly — a real corpus cannot be
+        # dropped to satisfy a config — which is exactly why migrate() raises and
+        # why the decision to override it belongs here, visibly, and nowhere else.
+        async with db.owner_connection() as connection:
+            await connection.execute(text(f"DROP TABLE IF EXISTS {TABLE}"))
+        await db.migrate()
     async with db.owner_connection() as connection:
         await connection.execute(text(f"TRUNCATE {TABLE}"))
     try:

@@ -20,7 +20,13 @@ import the library. Reach for storage explicitly::
 from ragsage.storage.config import PostgresConfig
 from ragsage.storage.engine import Database, create_engine, create_sessionmaker
 from ragsage.storage.identifiers import safe_identifier, safe_setting_name
-from ragsage.storage.schema import TABLE, migrate, migration_statements
+from ragsage.storage.schema import (
+    TABLE,
+    SchemaMismatch,
+    existing_embedding_dim,
+    migrate,
+    migration_statements,
+)
 from ragsage.storage.session import Statement, isolation_preamble, open_scoped_session
 from ragsage.storage.stores import (
     PgDocumentStore,
@@ -36,9 +42,11 @@ __all__ = [
     "PgLexicalStore",
     "PgVectorStore",
     "PostgresConfig",
+    "SchemaMismatch",
     "Statement",
     "create_engine",
     "create_sessionmaker",
+    "existing_embedding_dim",
     "isolation_preamble",
     "migrate",
     "migration_statements",
