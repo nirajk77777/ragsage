@@ -301,21 +301,17 @@ uv sync
 uv run pytest
 ```
 
-The gates CI runs, in order:
+Tests are offline by default — no database, no API keys, no network. The gates CI runs, in
+order:
 
 ```bash
 uv run ruff check . && uv run ruff format --check . && uv run mypy src examples && uv run pytest
 ```
 
-Tests are offline by default. Two suites opt in: `TEST_DATABASE_URL=postgresql://…` enables
-the integration tests against a real Postgres (needs the `vector` extension), and
-`RAGSAGE_LIVE_PROVIDERS=1` plus real keys enables the live provider tests.
-
-Issues and pull requests are welcome. Please run the four gates above before opening one, and
-if you change a port signature, update the affected example in the same change — CI runs
-those too. Design decisions live as ADRs in
-[`docs/adr/`](https://github.com/nirajk77777/ragsage/tree/main/docs/adr); a change that
-contradicts one should amend it.
+Issues and pull requests are welcome. [**CONTRIBUTING.md**](CONTRIBUTING.md) has the rest:
+the opt-in Postgres and live-provider suites, the import-graph invariants a change must not
+break, and the house rules that CI enforces. Found a security problem? Don't open an issue —
+see [SECURITY.md](SECURITY.md).
 
 ## Releasing
 
