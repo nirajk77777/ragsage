@@ -8,7 +8,7 @@ retrieval, reranking, grounded generation, and verifiable citations — behind
 provider-agnostic ports, so you can swap any model or store by implementing an interface.
 
 The library never imports web, auth, or tenant concepts. Callers pass an opaque
-[`Scope`](src/ragsage/scope.py) (a namespace plus optional metadata filters); the engine
+[`Scope`](https://github.com/nirajk77777/ragsage/blob/main/src/ragsage/scope.py) (a namespace plus optional metadata filters); the engine
 treats it as an untyped label. That single boundary is what lets the same engine run
 single-tenant from a script or CLI, and multi-tenant behind a SaaS backend, unchanged.
 
@@ -45,25 +45,25 @@ scope = Scope(namespace="local")
 
 Runnable, argument-free, and offline — start with the first:
 
-- [`examples/fakes_end_to_end.py`](examples/fakes_end_to_end.py) — the whole
+- [`examples/fakes_end_to_end.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/fakes_end_to_end.py) — the whole
   ingest-and-query loop against the in-memory fakes, in about ten lines of wiring.
-- [`examples/custom_embedder.py`](examples/custom_embedder.py) — implement the
+- [`examples/custom_embedder.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_embedder.py) — implement the
   `Embedder` port against something that isn't Voyage. The ports are `Protocol`s,
   so your adapter imports and subclasses nothing from ragsage.
-- [`examples/custom_parser.py`](examples/custom_parser.py) — implement
+- [`examples/custom_parser.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_parser.py) — implement
   `DocumentParser` to bypass the built-in `HeuristicBackend` on a format it
   doesn't understand.
-- [`examples/assembled_engine.py`](examples/assembled_engine.py) —
+- [`examples/assembled_engine.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/assembled_engine.py) —
   `RagSage.from_config(...)`: migrate, ingest, query and purge from one config
   object instead of hand-wiring ports. Wants a Postgres and skips without one.
 
 ## When retrieval looks wrong
 
 The built-in parser is heuristic and model-free by decision
-([ADR-0001](docs/adr/0001-heuristic-parser-replaces-docling.md)), which means it has known
+([ADR-0001](https://github.com/nirajk77777/ragsage/blob/main/docs/adr/0001-heuristic-parser-replaces-docling.md)), which means it has known
 weak spots — borderless tables, unusual multi-column layouts, vision-route misroutes, and
 documents whose headings are typographically invisible.
-[**docs/failure-modes.md**](docs/failure-modes.md) lists them symptom-first, with how to
+[**docs/failure-modes.md**](https://github.com/nirajk77777/ragsage/blob/main/docs/failure-modes.md) lists them symptom-first, with how to
 confirm each one from the parser's own output and what to do about it.
 
 ## Public surface
@@ -81,4 +81,4 @@ production adapters and the async streaming surface land as the backend wires th
 
 ## License
 
-Apache-2.0.
+[MIT](https://github.com/nirajk77777/ragsage/blob/main/LICENSE) — © 2026 Niraj Kumar.

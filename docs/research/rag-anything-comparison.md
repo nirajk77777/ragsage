@@ -316,7 +316,7 @@ i.e. the public API is not stable across installs.
 
 ## 5. `ragsage` as it stands today (and what's in the backend instead)
 
-**In the library** (`/Users/niraj/Desktop/Projects/rag-system/ragsage/`), ~4,700 lines of `src/`, Apache-2.0,
+**In the library** (`/Users/niraj/Desktop/Projects/rag-system/ragsage/`), ~4,700 lines of `src/`, MIT,
 `requires-python >=3.12` (`pyproject.toml`):
 
 - **12 ports**, all `typing.Protocol`, conformance by shape (`src/ragsage/ports.py`): `DocumentParser` (`:48`),

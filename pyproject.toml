@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A sage that only speaks from your corpus — a reusable, tenancy-agnostic RAG engine behind ports"
 readme = "README.md"
 requires-python = ">=3.12"
-license = "Apache-2.0"
+license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Niraj Kumar", email = "nirajk77777@gmail.com" }]
 keywords = ["rag", "retrieval", "llm", "embeddings", "citations", "vector-search"]
@@ -93,6 +93,9 @@ exclude = [
     "prototypes/",
     ".scratch/",
     ".claude/",
+    # Agent instructions, which point at repo-local scratch space that is itself
+    # excluded — meaningless to anyone reading the sdist.
+    "CLAUDE.md",
 ]
 
 [dependency-groups]

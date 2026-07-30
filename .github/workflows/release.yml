@@ -1,0 +1,74 @@
+name: Release
+
+# Publishing is driven by tags, not by pushes to main: `git tag v0.1.0 && git push
+# origin v0.1.0`. A PyPI version can never be reused or truly deleted, so the tag is
+# the deliberate, one-per-release act.
+on:
+  push:
+    tags: ["v*"]
+
+# No token is stored anywhere. PyPI trusts this workflow via OIDC (Trusted
+# Publishing), which is configured once on pypi.org against repo + workflow filename
+# + environment. See docs/releasing.md.
+permissions: {}
+
+jobs:
+  # Build and gate in a job with no id-token permission, so project code and its
+  # dependencies never run in the same job that holds the credential.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      # The same gates as CI. A tag can point at any commit, including one that
+      # never went through a pull request, so the release re-checks rather than
+      # trusting that it did.
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src examples
+      - run: uv run pytest
+
+      - run: uv build
+
+      # A tag that disagrees with pyproject.toml would publish a version nobody
+      # asked for, under a number that can never be corrected. Catch it here.
+      - name: Check the tag matches the packaged version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ ! -f "dist/ragsage-${version}.tar.gz" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match the version in pyproject.toml"
+            ls -1 dist
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # A GitHub environment named `pypi`, which is also what the Trusted Publisher on
+    # pypi.org is scoped to. Add required reviewers to it if you want a release to
+    # need a human click.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ragsage
+    permissions:
+      id-token: write # the OIDC token Trusted Publishing exchanges for an upload
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
