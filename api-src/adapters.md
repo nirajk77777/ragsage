@@ -8,7 +8,7 @@ the engine — swapping any of them changes no ragsage code.
 Heuristic and model-free, deliberately: the import graph carries no torch, no numpy ≥ 2, no
 transformers, no onnxruntime and no magika, which is a portability promise enforced by a
 test that probes the graph in a clean subprocess. See
-[Failure modes](../failure-modes.md) for what that costs.
+[Failure modes](site:failure-modes) for what that costs.
 
 ```{eval-rst}
 .. automodule:: ragsage.parsing

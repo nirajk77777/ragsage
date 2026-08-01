@@ -1,0 +1,5 @@
+# GitHub's language detection counts lines, and `website/` is a Next.js
+# application with a TypeScript source tree deep enough to outweigh `src/`.
+# Marking it as documentation keeps the repository reading as what it is — a
+# Python library — rather than as a JavaScript project that happens to ship one.
+website/** linguist-documentation

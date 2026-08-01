@@ -1,4 +1,7 @@
-# Quickstart
+---
+title: Quickstart
+description: Run the full ingest-and-query loop offline in about sixty seconds.
+---
 
 Python 3.12 or newer.
 
@@ -119,13 +122,13 @@ pulls SQLAlchemy, asyncpg and the provider SDKs, and `import ragsage` is guarant
 free of that stack. Reach for it by name.
 
 Note what the config does *not* do: read the environment. The script above does that, and
-passes values in. The library never touches {mod}`os` on your behalf, anywhere: a config
+passes values in. The library never touches [`os`](https://docs.python.org/3/library/os.html) on your behalf, anywhere: a config
 whose values depend on the ambient process is untestable, un-injectable and silently
 different in production.
 
 ## Streaming
 
-{meth}`~ragsage.sage.RagSage.stream` yields tokens, then resolved citations, then usage, then
+[`stream()`](/api/facades#ragsage.sage.RagSage.stream) yields tokens, then resolved citations, then usage, then
 one terminal event — the shape a server relays over SSE. The scoped database session is held
 open for the whole stream and released even if the consumer abandons it early:
 
@@ -146,7 +149,7 @@ async for event in sage.stream("How much parental leave do we get?", scope):
 
 ## Bringing your own adapter
 
-The ports are {class}`~typing.Protocol`s, so an adapter conforms by *shape* — it imports and
+The ports are [`Protocol`](https://docs.python.org/3/library/typing.html#typing.Protocol)s, so an adapter conforms by *shape* — it imports and
 subclasses nothing from ragsage:
 
 ```python
@@ -165,9 +168,9 @@ sage = RagSage.from_config(config, compute=compute)
 ```
 
 `stores=` swaps persistence the same way, and `database=` shares a connection pool with your
-own application. Outgrown the assembler? {class}`~ragsage.ingestion.IngestionPipeline` and
-{class}`~ragsage.query.QueryEngine` stay directly constructible, and
-{meth}`~ragsage.sage.RagSage.pipeline_for` / {meth}`~ragsage.sage.RagSage.engine_for` are
+own application. Outgrown the assembler? [`IngestionPipeline`](/api/facades#ragsage.ingestion.IngestionPipeline) and
+[`QueryEngine`](/api/facades#ragsage.query.QueryEngine) stay directly constructible, and
+[`pipeline_for()`](/api/facades#ragsage.sage.RagSage.pipeline_for) / [`engine_for()`](/api/facades#ragsage.sage.RagSage.engine_for) are
 public so you reach past the façade instead of forking it.
 
 ## The runnable examples
@@ -177,11 +180,11 @@ Four scripts in the repository, argument-free, type-checked *and executed* in CI
 | Script | What it shows |
 |---|---|
 | [`fakes_end_to_end.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/fakes_end_to_end.py) | The whole loop against the fakes, including the honest not-found path. |
-| [`custom_embedder.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_embedder.py) | Implementing {class}`~ragsage.ports.Embedder` against something that isn't Voyage. |
-| [`custom_parser.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_parser.py) | Implementing {class}`~ragsage.ports.DocumentParser` for a format the built-in backend doesn't understand. |
+| [`custom_embedder.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_embedder.py) | Implementing [`Embedder`](/api/ports#ragsage.ports.Embedder) against something that isn't Voyage. |
+| [`custom_parser.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_parser.py) | Implementing [`DocumentParser`](/api/ports#ragsage.ports.DocumentParser) for a format the built-in backend doesn't understand. |
 | [`assembled_engine.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/assembled_engine.py) | `RagSage.from_config(...)` end to end. Wants a Postgres; skips with a message without one. |
 
 ## Next
 
-- [API reference](api/index.md) — every façade, port, model and adapter.
-- [Failure modes](failure-modes.md) — when an answer looks wrong, check the parser first.
+- [API reference](/api) — every façade, port, model and adapter.
+- [Failure modes](/failure-modes) — when an answer looks wrong, check the parser first.

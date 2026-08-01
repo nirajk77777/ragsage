@@ -9,7 +9,7 @@ on:
 
 # No token is stored anywhere. PyPI trusts this workflow via OIDC (Trusted
 # Publishing), which is configured once on pypi.org against repo + workflow filename
-# + environment. See docs/releasing.md.
+# + environment. See website/content/releasing.mdx.
 permissions: {}
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
       # trusting that it did.
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy src examples
+      - run: uv run mypy src examples tools
       - run: uv run pytest
 
       - run: uv build

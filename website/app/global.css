@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/*
+ * Generated API signatures are long — a full annotated signature with defaults
+ * is the heading. Let them wrap rather than force the page sideways: on a phone
+ * a horizontally scrolling body is unreadable, and the signature is exactly the
+ * content a reader is most likely to be squinting at.
+ */
+#nd-page h2,
+#nd-page h3,
+#nd-page h4,
+#nd-page h5 {
+  overflow-wrap: anywhere;
+}

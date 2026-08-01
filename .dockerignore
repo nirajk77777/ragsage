@@ -1,0 +1,40 @@
+# The documentation image is built from the repository root, because the API
+# reference generator has to read `src/`. That makes everything below part of the
+# build context by default — including a `node_modules` built for the developer's
+# own operating system, which `COPY website/ ./` would then merge over the one
+# `npm ci` just installed for the image.
+#
+# It is not only a size problem, though half a gigabyte of context is reason
+# enough. It is that the resulting build depends on what happens to be on the
+# machine that started it, which is exactly the CI-and-deploy divergence the
+# single shared Dockerfile exists to prevent.
+
+# Dependencies and build output — reinstalled and rebuilt inside the image.
+**/node_modules
+website/.next
+website/out
+website/.source
+website/next-env.d.ts
+
+# The generated API reference. Stage 1 writes it; a stale copy from the host
+# would be overwritten anyway, but shipping it into the context invites the
+# question of which one won.
+website/content/api
+website/.api-manifest.json
+
+# Python build and tool state.
+.venv
+dist
+build
+**/__pycache__
+**/*.egg-info
+.mypy_cache
+.pytest_cache
+.ruff_cache
+api-src/_build
+
+# Version control and agent scratch space.
+.git
+.gitignore
+.claude
+.scratch

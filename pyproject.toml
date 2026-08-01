@@ -83,13 +83,24 @@ build-backend = "hatchling.build"
 packages = ["src/ragsage"]
 
 # The sdist ships the repo, which is right for a library people are meant to be
-# able to build and test from source — README, docs, examples and tests all belong
-# in it. These do not: agent scratch space, and `prototypes/`, which holds
-# deliberately throwaway experiments (see prototypes/*/README.md). They live in the
-# repo as a record of how a decision was reached; publishing them would put code
-# nobody should import in front of a first-time reader.
+# able to build and test from source — README, examples and tests all belong in
+# it. Prose documentation no longer does: it lives in `website/`, which is a
+# Next.js application, and a Python artifact has no business carrying one.
+#
+# This list is a *deny* list — everything not named here ships — so a new
+# top-level directory is included by default and each exclusion below is a
+# deliberate act. `website/node_modules` and `website/.next` need no entry of
+# their own: hatchling honours VCS ignore, verified against the shipped v0.1.0
+# sdist, which contains no `.venv/` despite one existing on disk.
 [tool.hatch.build.targets.sdist]
 exclude = [
+    # The documentation site. TypeScript, a lockfile, and — the moment anyone runs
+    # the dev server — a few hundred megabytes of `node_modules`.
+    # tests/test_documentation_boundary.py asserts this holds.
+    "website/",
+    # Deliberately throwaway experiments (see prototypes/*/README.md). They live
+    # in the repo as a record of how a decision was reached; publishing them would
+    # put code nobody should import in front of a first-time reader.
     "prototypes/",
     ".scratch/",
     ".claude/",
@@ -109,20 +120,28 @@ dev = [
     "httpx>=0.28",
     "asgi-lifespan>=2.1",
     "reportlab>=5.0.0",
+    # The build backend, so tests/test_documentation_boundary.py can build an
+    # sdist and look inside it. A build frontend normally fetches this into an
+    # isolated environment; a test that asserts over the artifact needs it here.
+    "hatchling>=1.27",
 ]
 
-# Documentation. Sphinx rather than MkDocs because the docstrings are already
-# written in Sphinx's dialect — 200-odd `:class:`/`:meth:`/`:mod:` cross-references
-# and numpydoc `Parameters` sections — which mkdocstrings would render as literal
-# text. MyST keeps the prose (guides, failure modes) in Markdown regardless.
+# The API-reference generator. Sphinx is no longer the documentation site — that
+# is Fumadocs, in `website/` — but it is still the only thing that resolves the
+# 200-odd `:class:`/`:meth:`/`:mod:` cross-references the docstrings are written
+# in. So it survives as a build-time data source: it reads `src/`,
+# sphinx-markdown-builder writes Markdown, and `tools/generate_api_docs.py`
+# corrects the two things that builder gets wrong.
 #
-# Not in `dev`: a docs build pulls Sphinx and its tree for no benefit to someone
-# running the tests. Read the Docs and CI ask for it by name (`--group docs`).
+# `furo` and `sphinx-copybutton` are gone with the HTML site: a theme and a
+# browser-side button are of no use to a build that emits Markdown.
+#
+# Not in `dev`: this pulls Sphinx and its tree for no benefit to someone running
+# the tests. The Dockerfile and CI ask for it by name (`--group docs`).
 docs = [
     "sphinx>=8.1",
-    "furo>=2024.8.6",
     "myst-parser>=4.0",
-    "sphinx-copybutton>=0.5.2",
+    "sphinx-markdown-builder>=0.6.10",
 ]
 
 [tool.ruff]
@@ -145,6 +164,11 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
+# The repository root, so `tools/` — the documentation generator and its two
+# post-passes — is importable by its tests. `src/` is not added: the package is
+# installed, and importing it two ways is how a test starts passing against code
+# that is not the code being shipped.
+pythonpath = ["."]
 markers = [
     "integration: talks to a real Postgres (skipped unless TEST_DATABASE_URL is set)",
     "live_providers: talks to the real Voyage/OpenAI APIs (skipped unless RAGSAGE_LIVE_PROVIDERS=1 and keys are set)",

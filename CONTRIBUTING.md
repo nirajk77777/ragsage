@@ -25,20 +25,48 @@ CI runs these, in this order, and a pull request has to clear all of them:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src examples
+uv run mypy src examples tools
 uv run pytest
-uv run --group docs sphinx-build -W -b html docs docs/_build/html
+docker build -f website/Dockerfile -t ragsage-docs .
 ```
 
 Two notes on the less obvious ones:
 
 - `ruff format` **also formats the Python blocks inside Markdown**, so a snippet in
   the README or the docs is held to the same style as the library.
-- The docs build runs with `-W`, so a broken `:class:` target or a page missing from
-  a toctree fails the build rather than shipping a dead link.
+- The docs image is the gate *and* the deploy. Building it generates the API
+  reference from your docstrings, builds the site, and then walks the built pages:
+  a broken `:class:` target, a dead link, a link whose `#fragment` lands nowhere, a
+  page missing from navigation — any of those fails the build, which is why a green
+  pull request cannot produce a broken site. It builds from the repository root, not
+  from `website/`, because the generator has to read `src/`.
 
 Beyond the gates, CI *executes* all four scripts in `examples/`. They are argument-free
 and type-checked, and a change that breaks one breaks the build.
+
+## The documentation site
+
+Two toolchains, one site, and the boundary between them is the file extension.
+
+- **Prose is MDX**, hand-written in `website/content/`. The path is the URL:
+  `website/content/quickstart.mdx` is `/quickstart`. React components are available;
+  navigation comes from the `meta.json` beside the pages.
+- **The API reference is generated** into `website/content/api/`, which is owned by
+  `tools/generate_api_docs.py` and wiped on every run — nothing hand-written may live
+  there. Sphinx is still what reads the docstrings, because it is the only thing that
+  resolves the cross-references they are written in; it just emits Markdown now and
+  is never served.
+
+To see your change:
+
+```bash
+uv run --group docs python tools/generate_api_docs.py   # once, and after docstring edits
+cd website && npm install && npm run dev
+```
+
+The generated pages are not committed, so the first command is what makes `/api` exist
+in a fresh checkout.
+
 
 ### The suites that don't run by default
 
@@ -90,8 +118,10 @@ it belongs in the consumer instead.
 runs, and CI runs them. Update them in the same commit.
 
 **Docstrings are reStructuredText.** They use Sphinx roles — ``` :class:`Scope` ```,
-``` :mod:`ragsage.ports` ``` — which the docs site turns into links. One trap worth
-naming, because it fails silently rather than loudly: a role or literal closed
+``` :mod:`ragsage.ports` ``` — and they stay that way even though the site is no longer
+Sphinx. Those roles are exactly what the generator resolves into working links, so
+writing them is cheaper than hand-maintaining two hundred link targets by hand. One trap
+worth naming, because it fails silently rather than loudly: a role or literal closed
 immediately by a letter does not close at all, and docutils swallows everything up to
 the next backtick.
 
@@ -107,7 +137,7 @@ record in the same pull request rather than quietly diverge from it.
 ## Style
 
 Ruff and mypy decide, not review comments. Line length is 100, the target is `py312`,
-and mypy runs `--strict` over both `src` and `examples`. Run `uv run ruff format .`
+and mypy runs `--strict` over `src`, `examples` and `tools`. Run `uv run ruff format .`
 before pushing and the formatting question never comes up.
 
 The one thing the tools can't check: comments and docstrings here explain **why**, not
@@ -128,7 +158,7 @@ and voice of the file you're editing.
 
 - **Bugs and feature requests:** [open an issue](https://github.com/nirajk77777/ragsage/issues).
   For a retrieval or parsing problem, check
-  [docs/failure-modes.md](https://ragsage.readthedocs.io/en/latest/failure-modes.html)
+  [failure modes](https://docs.ragsage.163.128.113.41.sslip.io/failure-modes)
   first — it lists the known weak spots symptom-first, and tells you how to confirm each
   from the parser's own output.
 - **Security vulnerabilities:** do **not** open an issue. See

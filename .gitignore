@@ -10,8 +10,9 @@ venv/
 dist/
 build/
 
-# Sphinx output. Read the Docs builds this itself from .readthedocs.yaml.
-docs/_build/
+# Sphinx output. Sphinx is a build-time generator now (api-src/ -> website/content/api/),
+# so this only appears when someone runs sphinx-build by hand to debug the generator.
+api-src/_build/
 
 # Env / secrets
 .env

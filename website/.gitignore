@@ -1,0 +1,22 @@
+# deps
+/node_modules
+
+# fumadocs-mdx's generated content index
+.source
+
+# build output
+/.next/
+/out/
+*.tsbuildinfo
+next-env.d.ts
+
+# The API reference, written by tools/generate_api_docs.py from the docstrings in
+# src/. Not committed: it is derived, it is 180 KB of Markdown, and a checked-in
+# copy would drift from the docstrings it claims to reflect between the moment
+# someone edits one and the moment they remember to regenerate. The Dockerfile
+# generates it; `npm run dev` wants it generated once by hand.
+/content/api/
+
+# Written by tools/generate_api_docs.py alongside content/api/, and read by the
+# build gate to check that what was generated is what got served.
+/.api-manifest.json

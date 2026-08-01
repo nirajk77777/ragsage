@@ -1,0 +1,15 @@
+{
+  "title": "ragsage",
+  "root": true,
+  "pages": [
+    "index",
+    "---Guides---",
+    "quickstart",
+    "failure-modes",
+    "---Reference---",
+    "api",
+    "---Project---",
+    "releasing",
+    "measurements"
+  ]
+}
