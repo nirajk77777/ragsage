@@ -119,8 +119,9 @@ pulls SQLAlchemy, asyncpg and the provider SDKs, and `import ragsage` is guarant
 free of that stack. Reach for it by name.
 
 Note what the config does *not* do: read the environment. The script above does that, and
-passes values in. The library never touches {mod}`os` on your behalf, anywhere — see
-[ADR-0002](adr/0002-ragsage-owns-its-storage.md).
+passes values in. The library never touches {mod}`os` on your behalf, anywhere: a config
+whose values depend on the ambient process is untestable, un-injectable and silently
+different in production.
 
 ## Streaming
 

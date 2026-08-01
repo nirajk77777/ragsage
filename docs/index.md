@@ -38,20 +38,11 @@ api/index
 
 ```{toctree}
 :maxdepth: 1
-:caption: Decisions
-:hidden:
-
-adr/index
-```
-
-```{toctree}
-:maxdepth: 1
 :caption: Project
 :hidden:
 
 releasing
 measurements/07-heading-window-contextualizer
-research/rag-anything-comparison
 ```
 
 ## Where to go next
@@ -61,7 +52,6 @@ research/rag-anything-comparison
 | run the engine in the next five minutes | [Quickstart](quickstart.md) |
 | know what every class and port does | [API reference](api/index.md) |
 | work out why an answer looks wrong | [Failure modes of the heuristic parser](failure-modes.md) |
-| understand why it's built this way | [Architecture decisions](adr/index.md) |
 | cut a release | [Releasing](releasing.md) |
 | see what changed in a version | [GitHub releases](https://github.com/nirajk77777/ragsage/releases) |
 

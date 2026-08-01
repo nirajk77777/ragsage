@@ -65,12 +65,10 @@ already imported everything):
 
 - `ragsage.parsing` must not pull `torch`, `numpy>=2`, `transformers`, `onnxruntime`
   or `magika`. That is a portability promise to every downstream consumer, not a
-  preference — see `tests/test_dependency_guard.py` and
-  [ADR-0001](docs/adr/0001-heuristic-parser-replaces-docling.md).
+  preference — see `tests/test_dependency_guard.py`.
 - A bare `import ragsage` must not pull SQLAlchemy, asyncpg or a provider SDK. Storage
   and providers are installed, but reaching them is deliberate. See
-  `tests/test_storage_imports.py` and
-  [ADR-0002](docs/adr/0002-ragsage-owns-its-storage.md).
+  `tests/test_storage_imports.py`.
 
 If you need something heavy, put it behind a lazy import inside the function that
 needs it, the way `ragsage.parsing.pdf` does.
@@ -102,10 +100,9 @@ the next backtick.
 :class:`Chunk` objects   ← right
 ```
 
-**ADRs are the record.** Design decisions live in
-[`docs/adr/`](https://github.com/nirajk77777/ragsage/tree/main/docs/adr). A change that
-contradicts one should amend that ADR in the same pull request rather than quietly
-diverge from it.
+**ADRs are the record.** Write a design decision down as a Markdown ADR under `docs/adr/`,
+one file per decision. A change that contradicts a recorded decision should amend that
+record in the same pull request rather than quietly diverge from it.
 
 ## Style
 

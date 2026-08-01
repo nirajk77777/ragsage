@@ -1,7 +1,7 @@
 # Read the Docs build configuration.
 #
 # The site is Sphinx (docs/conf.py) with MyST, so the Markdown already in docs/ —
-# the ADRs, the failure-mode catalogue, the measurements — are the pages, and the
+# the guides, the failure-mode catalogue, the measurements — are the pages, and the
 # API reference is generated from the docstrings in src/.
 #
 # https://docs.readthedocs.com/platform/stable/config-file/v2.html

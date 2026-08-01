@@ -5,7 +5,7 @@ already written in Sphinx's dialect — around two hundred ``:class:``/``:meth:`
 ``:mod:``/``:attr:`` cross-references plus numpydoc ``Parameters`` sections. Sphinx
 turns those into working links with no edit to a single docstring; mkdocstrings
 would render them as literal ``:class:`Scope``` text. MyST-Parser keeps the prose
-side (the ADRs, the failure-mode catalogue, these notes) in Markdown, so nothing
+side (the guides, the failure-mode catalogue, these notes) in Markdown, so nothing
 here has to be written in reStructuredText.
 
 The source directory is ``docs/`` itself rather than a nested ``docs/source``, so
@@ -47,7 +47,7 @@ extensions = [
     # "[source]" links next to every documented object. Worth more than usual
     # here: the docstrings explain decisions, and the code is the evidence.
     "sphinx.ext.viewcode",
-    # Markdown authoring, so the ADRs and guides need no conversion.
+    # Markdown authoring, so the prose guides need no conversion.
     "myst_parser",
     # A copy button on every code block.
     "sphinx_copybutton",
@@ -72,11 +72,12 @@ exclude_patterns = [
 
 # MyST extensions, kept to the ones the existing Markdown actually needs:
 # `colon_fence` for ::: blocks, `deflist` for definition lists, `linkify` is
-# deliberately absent (it rewrites bare URLs and would surprise the ADR authors).
+# deliberately absent (it rewrites bare URLs and would surprise the prose authors).
 myst_enable_extensions = ["colon_fence", "deflist", "smartquotes", "substitution"]
 
-# The ADRs and the failure-mode catalogue use `##`-level headings for structure and
-# are linked to by section elsewhere; generate anchors so those links resolve.
+# The failure-mode catalogue and the longer guides use `##`-level headings for
+# structure and are linked to by section elsewhere; generate anchors so those
+# links resolve.
 myst_heading_anchors = 3
 
 # -- HTML output ------------------------------------------------------------ #

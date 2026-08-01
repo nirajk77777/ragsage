@@ -29,7 +29,7 @@ pip install ragsage
 ```
 
 📖 **[Documentation](https://ragsage.readthedocs.io/)** — quickstart, full API reference,
-failure modes, and the architecture decisions behind them.
+and the failure modes of the heuristic parser.
 
 ## 60 seconds, no API key
 
@@ -211,8 +211,8 @@ façade instead of forking it.
 ## Configuration
 
 The library **never reads `os.environ`** — every key, DSN and model id arrives in a frozen
-dataclass constructed by you, at your own composition root
-([ADR-0002](https://github.com/nirajk77777/ragsage/blob/main/docs/adr/0002-ragsage-owns-its-storage.md)).
+dataclass constructed by you, at your own composition root. A config whose values depend on
+the ambient process is untestable, un-injectable and silently different in production.
 
 <details>
 <summary><b>The knobs, and their defaults</b></summary>

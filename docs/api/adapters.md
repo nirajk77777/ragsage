@@ -5,10 +5,9 @@ the engine — swapping any of them changes no ragsage code.
 
 ## Parsing and chunking
 
-Heuristic and model-free by decision
-([ADR-0001](../adr/0001-heuristic-parser-replaces-docling.md)): the import graph carries no
-torch, no numpy ≥ 2, no transformers, no onnxruntime and no magika, which is a portability
-promise enforced by a test that probes the graph in a clean subprocess. See
+Heuristic and model-free, deliberately: the import graph carries no torch, no numpy ≥ 2, no
+transformers, no onnxruntime and no magika, which is a portability promise enforced by a
+test that probes the graph in a clean subprocess. See
 [Failure modes](../failure-modes.md) for what that costs.
 
 ```{eval-rst}

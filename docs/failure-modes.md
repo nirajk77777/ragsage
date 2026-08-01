@@ -3,11 +3,12 @@
 When an answer looks wrong, check the parser before you check retrieval: often the engine
 retrieved exactly what it was given, and what it was given is not what you saw on the page.
 `ragsage` parses with a pure-Python, model-free heuristic
-parser: no layout model, no table model, no OCR tier
-([ADR-0001](adr/0001-heuristic-parser-replaces-docling.md)). That ADR accepts degradation on
-messy inputs in as many words. This document is what "accepted degradation" actually looks
-like from the asking side, so you can recognise it in one reading instead of spending an
-afternoon on the retrieval stack.
+parser: no layout model, no table model, no OCR tier. That is a deliberate trade, and the
+degradation on messy inputs is accepted rather than unforeseen: what it buys is a parser
+that installs anywhere, pulls no heavyweight numerical stack, and downloads no model
+weights. This document is what "accepted degradation" actually looks like from the asking
+side, so you can recognise it in one reading instead of spending an afternoon on the
+retrieval stack.
 
 Each entry is **symptom → how to confirm → why → workaround**, and names the code that
 decides. Line numbers drift; the function or constant beside each one is the durable part.
@@ -333,9 +334,10 @@ The damage is downstream, in two places:
 
 Four things this parser does not do. If you are here about one of them, stop debugging.
 
-**Scanned pages have no local OCR tier.** ADR-0001 is explicit about it. A scan is readable
-only if the caller wired an `LLMClient` whose `transcribe`
-([`ports.py:126`](https://github.com/nirajk77777/ragsage/blob/main/src/ragsage/ports.py)) actually calls a vision model. Routing works — a
+**Scanned pages have no local OCR tier.** The model-free parser rules one out by
+construction — an OCR tier is a model, and shipping one would cost the portability the
+parser exists to keep. A scan is readable only if the caller wired an `LLMClient` whose
+`transcribe` ([`ports.py:126`](https://github.com/nirajk77777/ragsage/blob/main/src/ragsage/ports.py)) actually calls a vision model. Routing works — a
 page-filling raster with no text layer trips all three classifier thresholds and gets a
 rendered image — but the transcription is your adapter's job, not the library's. Driving the
 engine from the CLI or the in-memory fakes gives you a stand-in instead:
@@ -351,8 +353,9 @@ appear in none of the router's three tables (`_MEDIA_TYPES`
 `HeuristicBackend._parse_pages` raises
 `ValueError: unrecognised document format for source '…'`
 ([`backend.py:99-100`](https://github.com/nirajk77777/ragsage/blob/main/src/ragsage/parsing/backend.py)) — verified for `.doc`, `.xls` and
-`.ppt`. This is the intended behaviour and it is out of scope in both ADR-0001 and the
-current spec. Convert to the modern OOXML equivalent (`.docx` / `.pptx`) and re-upload.
+`.ppt`. This is the intended behaviour: the legacy binary formats are out of scope for the
+heuristic parser and for the current spec alike. Convert to the modern OOXML equivalent
+(`.docx` / `.pptx`) and re-upload.
 
 **Spreadsheets are out of scope — but they do not fail cleanly, and that is a wart.** `.xlsx`
 has no entry in the media-type or extension tables either, so routing falls through to
