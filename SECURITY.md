@@ -46,7 +46,7 @@ The parts of ragsage where a flaw would cross a trust boundary:
   [Trusted Publishing](https://docs.pypi.org/trusted-publishers/): no API token exists
   anywhere, and the job holding the OIDC credential runs no project code. A flaw in
   that release path is in scope — see
-  [releasing](https://docs.ragsage.163.128.113.41.sslip.io/releasing).
+  [releasing](https://ragsage-docs.nirajk.dev/releasing).
 - **Untrusted document handling.** ragsage parses PDF, DOCX, PPTX and HTML supplied by
   whoever uploads them. A malicious document that achieves code execution, an
   unbounded resource exhaustion, or an SSRF/file read through a parser path is in
@@ -65,7 +65,7 @@ documentation is welcome:
   corpus as a trust boundary you control.
 - **Answer quality, hallucination and retrieval misses.** Ordinary bugs — file them as
   issues. See
-  [failure modes](https://docs.ragsage.163.128.113.41.sslip.io/failure-modes) for the
+  [failure modes](https://ragsage-docs.nirajk.dev/failure-modes) for the
   parser's known weak spots.
 - **Vulnerabilities in dependencies**, unless ragsage's own use of one is what makes it
   exploitable. Report those upstream; tell me too if ragsage needs a version bump.

@@ -67,7 +67,6 @@ cd website && npm install && npm run dev
 The generated pages are not committed, so the first command is what makes `/api` exist
 in a fresh checkout.
 
-
 ### The suites that don't run by default
 
 Two opt in through the environment, because they need something CI can't assume:
@@ -158,7 +157,7 @@ and voice of the file you're editing.
 
 - **Bugs and feature requests:** [open an issue](https://github.com/nirajk77777/ragsage/issues).
   For a retrieval or parsing problem, check
-  [failure modes](https://docs.ragsage.163.128.113.41.sslip.io/failure-modes)
+  [failure modes](https://ragsage-docs.nirajk.dev/failure-modes)
   first — it lists the known weak spots symptom-first, and tells you how to confirm each
   from the parser's own output.
 - **Security vulnerabilities:** do **not** open an issue. See

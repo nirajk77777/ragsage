@@ -11,7 +11,7 @@ swappable ports.
 [![PyPI](https://img.shields.io/pypi/v/ragsage.svg)](https://pypi.org/project/ragsage/)
 [![Python](https://img.shields.io/pypi/pyversions/ragsage.svg)](https://pypi.org/project/ragsage/)
 [![CI](https://github.com/nirajk77777/ragsage/actions/workflows/ci.yml/badge.svg)](https://github.com/nirajk77777/ragsage/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://docs.ragsage.163.128.113.41.sslip.io/)
+[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://ragsage-docs.nirajk.dev/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/nirajk77777/ragsage/blob/main/LICENSE)
 [![Typed](https://img.shields.io/badge/typing-strict-informational.svg)](https://github.com/nirajk77777/ragsage/blob/main/src/ragsage/py.typed)
 
@@ -28,7 +28,7 @@ retrieval.
 pip install ragsage
 ```
 
-📖 **[Documentation](https://docs.ragsage.163.128.113.41.sslip.io/)** — quickstart, full API reference,
+📖 **[Documentation](https://ragsage-docs.nirajk.dev/)** — quickstart, full API reference,
 and the failure modes of the heuristic parser.
 
 ## 60 seconds, no API key
@@ -319,7 +319,7 @@ Tag-driven and tokenless: `git tag v0.1.0 && git push origin v0.1.0` re-runs eve
 builds, and publishes to PyPI via
 [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — no API token exists
 anywhere, and the job holding the OIDC credential runs no project code. See
-[Releasing](https://docs.ragsage.163.128.113.41.sslip.io/releasing).
+[Releasing](https://ragsage-docs.nirajk.dev/releasing).
 
 ## License
 
