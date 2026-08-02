@@ -17,6 +17,12 @@ pages, in two shapes: 27 mid-signature (``, ,``) and 8 where the marker is the
 first parameter (``(,``). Neither string can occur in a valid Python signature,
 which is what makes the restoration unambiguous rather than a guess.
 
+The restoration tests mostly assert an artefact is *gone*, which is trivially true
+of a fixture that never carried one — so they share a canary establishing that the
+fixtures are still corrupt to begin with. The count the pass reports gets the same
+treatment, because it is what the built-site gate later checks survived: a counter
+stuck at zero would leave that gate asserting nothing over nothing.
+
 **Defect two: every source link is dropped.** ``sphinx.ext.viewcode`` puts a
 ``[source]`` link on all 222 documented objects in the HTML build; the Markdown
 builder never visits the nodes that carry them, so all 222 vanish.
@@ -29,6 +35,7 @@ from __future__ import annotations
 
 from tools.generate_api_docs import (
     add_frontmatter,
+    count_eaten_markers,
     inject_source_links,
     restore_keyword_only_markers,
 )
@@ -52,6 +59,21 @@ _EATEN_LEADING = (
     "### *class* ragsage.query.QueryEngine(, embedder: [Embedder](ports#ragsage.ports.Embedder), "
     "tracer: [Tracer](ports#ragsage.ports.Tracer) | [None](https://docs.python.org/3/z#None) = None)"
 )
+
+
+def test_the_fixtures_carry_the_artefact() -> None:
+    # The canary. Every test below asserts an artefact is *absent* after the pass,
+    # which is trivially true of a fixture that never carried one — and these are
+    # trimmed from real generated pages, so a re-trim from a page the generator had
+    # already corrected would silence the lot while the pass did nothing at all.
+    assert ", , " in _EATEN_MID, (
+        "the mid-signature fixture is no longer corrupt, so the tests that assert the "
+        "artefact is gone prove nothing about the pass"
+    )
+    assert "(, " in _EATEN_LEADING, (
+        "the leading-marker fixture is no longer corrupt, so the tests that assert the "
+        "artefact is gone prove nothing about the pass"
+    )
 
 
 def test_restores_a_marker_eaten_mid_signature() -> None:
@@ -109,9 +131,28 @@ def test_restores_across_a_whole_page() -> None:
 
     restored = restore_keyword_only_markers(page)
 
+    # Both shapes, positively: an absence alone would not distinguish a marker put
+    # back from a comma pair quietly deleted.
+    assert restored.count(", *, ") == 1
+    assert restored.count("(*, ") == 1
     assert ", , " not in restored
     assert "(, " not in restored
     assert "Some prose." in restored
+
+
+def test_counts_the_markers_it_would_restore() -> None:
+    """The count is the gate's canary, so it cannot be left to trust.
+
+    ``count_eaten_markers`` is what the manifest reports and what
+    ``check-built-site.mjs`` asserts survived into the built pages. That check is
+    ``restored >= manifest.markersRestored`` — so a counter stuck at zero passes
+    it vacuously, and takes the gate's "no signature still carries the artefact"
+    assertion down with it, since both are then ranging over nothing.
+    """
+    page = "\n".join([_EATEN_MID, "", "Prose with `, ,` in it.", "", _EATEN_LEADING, ""])
+
+    assert count_eaten_markers(page) == 2
+    assert count_eaten_markers(restore_keyword_only_markers(page)) == 0
 
 
 # ---------------------------------------------------------------------------- #
