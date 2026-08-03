@@ -17,6 +17,10 @@ The two corrections are pure text transforms, tested in
 ``tests/test_api_docs_generator.py``, and each is documented at its definition.
 Read those docstrings before changing either — both defects produce output that
 *looks* correct, which is why they are worth this much ceremony.
+
+For the same reason the run also names, on stderr, every documented object it
+could not give a source link. Most never had one and never will; the list is
+there so the one that *stopped* having one is visible.
 """
 
 from __future__ import annotations
@@ -30,11 +34,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, TextIO
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SPHINX_SRC = _REPO_ROOT / "api-src"
@@ -51,6 +55,18 @@ _OUTPUT_DIR = _REPO_ROOT / "website" / "content" / "api"
 # Outside `content/`, deliberately: a stray `.json` inside it would be read as a
 # navigation file.
 _MANIFEST = _REPO_ROOT / "website" / ".api-manifest.json"
+
+# The floor the run refuses to go under. Not in tension with the paragraph above:
+# that argues against a hard-coded *equality*, which the site gate needs and gets
+# from the manifest. This is the other check — that the number in the manifest is
+# worth conserving in the first place. Conservation is happy to preserve three
+# links faithfully all the way to the served page.
+#
+# 222 objects resolve today, so the floor sits well below: a class documented or
+# retired must not need an edit here. It is high enough that losing any of the
+# three substantial pages trips it — adapters carries 114 links, ports 48,
+# façades 36 — and that is the failure it exists to catch.
+_MINIMUM_SOURCE_LINKS = 200
 
 # Where a `[source]` link points. `main` rather than the released tag, matching
 # what the retired furo theme linked to: the reference documents the code as it
@@ -148,7 +164,22 @@ def count_eaten_markers(text: str) -> int:
 # ---------------------------------------------------------------------------- #
 
 
-def inject_source_links(text: str, resolve: Callable[[str], str | None]) -> str:
+@dataclass(frozen=True)
+class Injection:
+    """A linked page, and the objects it could not link.
+
+    The second half is here because nowhere downstream can recover it: once the
+    page is written, an object that was passed over is indistinguishable from one
+    that never wanted a link. See :func:`report_unresolved`.
+    """
+
+    text: str
+    #: Dotted names the ``resolve`` callable could not place, deduplicated in the
+    #: order they appear on the page.
+    unresolved: tuple[str, ...]
+
+
+def inject_source_links(text: str, resolve: Callable[[str], str | None]) -> Injection:
     """Put a ``[source]`` link under every heading whose object can be located.
 
     ``sphinx.ext.viewcode`` produced 222 of these in the HTML build, and the
@@ -163,6 +194,11 @@ def inject_source_links(text: str, resolve: Callable[[str], str | None]) -> str:
     anchors ``viewcode`` also passed over, so skipping them reproduces the old
     site's link set instead of inventing 187 links it never had.
 
+    They are *named* on the way out all the same, for the reasons argued at
+    :func:`report_unresolved`. Producing the list falls to this pass because this
+    is the only place that knows which anchors were documented objects at all —
+    the rest are section targets, and were never owed a link.
+
     The link goes on its own line *below* the heading rather than at the end of
     it, which is where the HTML build put it. In Markdown the heading text is also
     the table-of-contents entry, and a ``[source]`` welded onto every signature
@@ -170,6 +206,7 @@ def inject_source_links(text: str, resolve: Callable[[str], str | None]) -> str:
     """
     lines = text.split("\n")
     out: list[str] = []
+    unresolved: list[str] = []
     index = 0
 
     while index < len(lines):
@@ -195,10 +232,39 @@ def inject_source_links(text: str, resolve: Callable[[str], str | None]) -> str:
             continue
 
         url = resolve(anchor.group(1))
-        if url is not None:
+        if url is None:
+            unresolved.append(anchor.group(1))
+        else:
             out.append(_SOURCE_LINK.format(url=url))
 
-    return "\n".join(out)
+    # Deduplicated: an object documented twice on a page is one object to look
+    # into, and a list that repeats it reads as two defects.
+    return Injection(text="\n".join(out), unresolved=tuple(dict.fromkeys(unresolved)))
+
+
+def report_unresolved(unresolved: Sequence[str], stream: TextIO) -> None:
+    """Write the documented objects that got no ``[source]`` link.
+
+    Not an error, and deliberately not fatal: 187 of the 409 documented anchors
+    are attributes, enum members and module constants that never had a source
+    link in the HTML build either. Failing on them would fail every build.
+
+    Names, not a number. The event worth catching is a *change* to this set — one
+    class that quietly stopped resolving — and a number says only that something
+    moved, somewhere in 187 objects across six pages. Naming them is what lets
+    the run that noticed be compared against the run before it.
+    """
+    if not unresolved:
+        return
+
+    objects = "object" if len(unresolved) == 1 else "objects"
+    print(
+        f"{len(unresolved)} documented {objects} with no source location, left without "
+        "a [source] link:",
+        file=stream,
+    )
+    for dotted in unresolved:
+        print(f"  {dotted}", file=stream)
 
 
 def _next_content_line(lines: list[str], start: int) -> int | None:
@@ -373,6 +439,9 @@ class GenerationReport:
     pages: int
     markers_restored: int
     source_links: int
+    #: Every documented object across the six pages that could not be given a
+    #: source link, sorted and deduplicated.
+    unresolved: tuple[str, ...]
 
 
 def generate() -> GenerationReport:
@@ -440,6 +509,7 @@ def _write_pages(raw: Path, output_dir: Path) -> GenerationReport:
     output_dir.mkdir(parents=True)
 
     pages = markers = links = 0
+    unresolved: list[str] = []
 
     emitted = {source.stem for source in raw.glob("*.md")}
     if emitted != set(_DESCRIPTIONS):
@@ -452,19 +522,26 @@ def _write_pages(raw: Path, output_dir: Path) -> GenerationReport:
 
     for source in sorted(raw.glob("*.md")):
         original = source.read_text(encoding="utf-8")
-        corrected = add_frontmatter(
-            inject_source_links(restore_keyword_only_markers(original), resolve_source_url),
-            description=_DESCRIPTIONS[source.stem],
-        )
+        injected = inject_source_links(restore_keyword_only_markers(original), resolve_source_url)
+        corrected = add_frontmatter(injected.text, description=_DESCRIPTIONS[source.stem])
         (output_dir / source.name).write_text(corrected, encoding="utf-8")
 
         pages += 1
         markers += count_eaten_markers(original)
         links += len(_SOURCE_LINK_RE.findall(corrected))
+        unresolved.extend(injected.unresolved)
 
     (output_dir / "meta.json").write_text(json.dumps(_META, indent=2) + "\n", encoding="utf-8")
 
-    return GenerationReport(pages=pages, markers_restored=markers, source_links=links)
+    return GenerationReport(
+        pages=pages,
+        markers_restored=markers,
+        source_links=links,
+        # Sorted across pages rather than left in page order: an object can be
+        # documented on more than one, and a stable order is what makes one run's
+        # list comparable to the last one's.
+        unresolved=tuple(sorted(set(unresolved))),
+    )
 
 
 def _write_manifest(report: GenerationReport) -> None:
@@ -489,18 +566,23 @@ def main() -> int:
 
     # A fail-fast canary, not the real gate. The built site is walked link by link
     # before it can deploy, and that is what proves the reference is sound — but it
-    # costs a full image build. An empty or link-less generation is a broken
+    # costs a full image build. An empty or under-linked generation is a broken
     # pipeline, and saying so here saves three stages of confusion.
-    if report.pages == 0 or report.source_links == 0:
+    if report.pages == 0 or report.source_links < _MINIMUM_SOURCE_LINKS:
         raise SystemExit(
-            f"generated {report.pages} pages with {report.source_links} source links — "
-            "nothing downstream can be sound"
+            f"generated {report.pages} pages with {report.source_links} source links, "
+            f"against a floor of {_MINIMUM_SOURCE_LINKS} — nothing downstream can be sound"
         )
+
+    # Before the summary, and on stderr: the list is long, and the line worth
+    # reading last is the one that says what was written.
+    report_unresolved(report.unresolved, sys.stderr)
 
     print(
         f"wrote {report.pages} pages to {_OUTPUT_DIR}: "
         f"{report.markers_restored} keyword-only markers restored, "
-        f"{report.source_links} source links injected"
+        f"{report.source_links} source links injected, "
+        f"{len(report.unresolved)} objects with no source location"
     )
     return 0
 

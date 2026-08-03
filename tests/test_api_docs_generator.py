@@ -5,7 +5,8 @@ part of it that is ours. The generator's *output* is checked far more thoroughly
 than this — the built site is walked link by link before it can deploy — but that
 check costs a full multi-stage image build, which is a multi-minute cycle on
 exactly the code most likely to need another attempt. Both passes are pure
-text-in/text-out, so they get a fast seam of their own.
+functions over the page text, so they get a fast seam of their own — as does the
+one thing they call out to, which turns a dotted name into a line of source.
 
 **Defect one: the keyword-only marker is eaten.** Sphinx's Python domain wraps
 PEP 3102's ``*`` separator in a docutils ``abbreviation`` node (for the tooltip
@@ -29,14 +30,26 @@ builder never visits the nodes that carry them, so all 222 vanish.
 ``sphinx.ext.linkcode`` was tried as the remedy and is dropped the same way. The
 links are therefore injected here instead, off the dotted name in the anchor that
 the builder emits above every generated heading.
+
+The injection has two halves and they are tested apart. Placing the link is pure
+text, so it is exercised against a stub resolver. *Resolving* a dotted name to a
+file and a line is the half that can be quietly wrong — a plausible URL that
+lands on the wrong line reads as a working link — so those tests take the URL the
+generator produced, open the checked-in file at the line it names, and assert the
+object is declared there.
 """
 
 from __future__ import annotations
+
+import io
+from pathlib import Path
 
 from tools.generate_api_docs import (
     add_frontmatter,
     count_eaten_markers,
     inject_source_links,
+    report_unresolved,
+    resolve_source_url,
     restore_keyword_only_markers,
 )
 
@@ -171,11 +184,12 @@ def test_injects_a_source_link_below_a_documented_heading() -> None:
 
     injected = inject_source_links(page, _resolve_only_query_engine)
 
-    lines = injected.splitlines()
+    lines = injected.text.splitlines()
     heading = lines.index("### *class* ragsage.query.QueryEngine")
     # Immediately below the heading, not appended to it: a `[source]` inside the
     # heading text lands in the page's table of contents, once per entry.
     assert lines[heading + 1] == f"[\\[source\\]]({_URL})"
+    assert injected.unresolved == ()
 
 
 def test_skips_an_object_with_no_locatable_source() -> None:
@@ -187,21 +201,60 @@ def test_skips_an_object_with_no_locatable_source() -> None:
     """
     page = '<a id="ragsage.config.QueryOptions.top_k"></a>\n\n#### top_k *: int = 5*\n'
 
-    assert inject_source_links(page, _resolve_only_query_engine) == page
+    assert inject_source_links(page, _resolve_only_query_engine).text == page
+
+
+def test_reports_the_objects_it_could_not_link() -> None:
+    """Skipped is not the same as unnoticed.
+
+    Most of the 187 are attributes that never had a source link and never will.
+    But the set is also where a *regression* shows up: a class that stops
+    resolving loses its link and changes nothing else about the page, so the only
+    way anyone finds out is if the pass says which objects it passed over.
+    """
+    page = (
+        '<a id="ragsage.query.QueryEngine"></a>\n\n### *class* ragsage.query.QueryEngine\n\n'
+        '<a id="ragsage.config.QueryOptions.top_k"></a>\n\n#### top_k *: int = 5*\n\n'
+        "<a id=\"ragsage.parsing.DocumentFormat.PDF\"></a>\n\n#### PDF *= 'pdf'*\n"
+    )
+
+    injected = inject_source_links(page, _resolve_only_query_engine)
+
+    assert injected.unresolved == (
+        "ragsage.config.QueryOptions.top_k",
+        "ragsage.parsing.DocumentFormat.PDF",
+    )
+
+
+def test_reports_an_object_once_however_often_it_appears() -> None:
+    """A name repeated down the list reads as several defects rather than one."""
+    anchor = '<a id="ragsage.config.QueryOptions.top_k"></a>\n\n#### top_k *: int = 5*\n'
+
+    injected = inject_source_links(anchor + "\n" + anchor, _resolve_only_query_engine)
+
+    assert injected.unresolved == ("ragsage.config.QueryOptions.top_k",)
 
 
 def test_ignores_prose_section_anchors() -> None:
     """``markdown_anchor_sections`` anchors every heading, not only the API ones."""
     page = '<a id="the-shape-of-it"></a>\n\n## The shape of it\n'
 
-    assert inject_source_links(page, lambda dotted: _URL) == page
+    injected = inject_source_links(page, lambda dotted: _URL)
+
+    assert injected.text == page
+    assert injected.unresolved == ()
 
 
 def test_ignores_an_anchor_that_is_not_followed_by_a_heading() -> None:
     """A cross-reference target mid-paragraph is an anchor too, and is not an object."""
     page = '<a id="ragsage.query.QueryEngine"></a>\n\nSome prose that is not a heading.\n'
 
-    assert inject_source_links(page, _resolve_only_query_engine) == page
+    injected = inject_source_links(page, _resolve_only_query_engine)
+
+    assert injected.text == page
+    # Not an object, so not something the pass failed to link: reporting it would
+    # put a name in the operator's list that no source link was ever owed.
+    assert injected.unresolved == ()
 
 
 def test_handles_a_module_anchor() -> None:
@@ -213,7 +266,7 @@ def test_handles_a_module_anchor() -> None:
         page, lambda dotted: url if dotted == "ragsage.smalltalk" else None
     )
 
-    assert injected.splitlines()[-1] == f"[\\[source\\]]({url})"
+    assert injected.text.splitlines()[-1] == f"[\\[source\\]]({url})"
 
 
 def test_injects_once_per_object_across_a_page() -> None:
@@ -225,7 +278,7 @@ def test_injects_once_per_object_across_a_page() -> None:
 
     injected = inject_source_links(page, _resolve_only_query_engine)
 
-    assert injected.count("[\\[source\\]]") == 2
+    assert injected.text.count("[\\[source\\]]") == 2
 
 
 def test_is_idempotent() -> None:
@@ -239,7 +292,120 @@ def test_is_idempotent() -> None:
 
     once = inject_source_links(page, _resolve_only_query_engine)
 
-    assert inject_source_links(once, _resolve_only_query_engine) == once
+    assert inject_source_links(once.text, _resolve_only_query_engine).text == once.text
+
+
+def test_lists_every_unlinkable_object_for_the_operator() -> None:
+    """The report is the whole list, not a count.
+
+    A count says the number changed; the list says which object changed, which is
+    the difference between "something regressed somewhere in six pages" and a
+    one-line diff against the previous run's output.
+    """
+    stream = io.StringIO()
+
+    report_unresolved(
+        ("ragsage.storage.PostgresConfig.dsn", "ragsage.caching.PARSE_CACHE_VERSION"), stream
+    )
+
+    written = stream.getvalue()
+    assert "2" in written
+    assert "ragsage.storage.PostgresConfig.dsn" in written
+    assert "ragsage.caching.PARSE_CACHE_VERSION" in written
+
+
+def test_says_nothing_when_every_object_was_linked() -> None:
+    stream = io.StringIO()
+
+    report_unresolved((), stream)
+
+    assert stream.getvalue() == ""
+
+
+# ---------------------------------------------------------------------------- #
+# Resolving a dotted name to a line of source
+# ---------------------------------------------------------------------------- #
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Spelt out rather than imported from the generator, which is the whole assertion:
+# imported, a link rewritten to point at a fork or a branch that does not exist
+# would agree with itself and say nothing. The repository and the revision are
+# half of what makes a source link correct.
+_BLOB_PREFIX = "https://github.com/nirajk77777/ragsage/blob/main/"
+
+
+def _source_at(url: str, count: int = 1) -> str:
+    """The lines of checked-in source a generated URL points at.
+
+    Deliberately not ``inspect``. The generator asked ``inspect`` where an object
+    lives, so asking it again here would prove only that it is consistent with
+    itself — and the failure this guards against is a URL that is well-formed,
+    plausible and off by a file or a definition. Opening the repository file at
+    the line the link names is what a reader clicking it actually gets.
+    """
+    assert url.startswith(_BLOB_PREFIX), f"not a link into this repository: {url}"
+
+    path, _, fragment = url.removeprefix(_BLOB_PREFIX).partition("#")
+    first = int(fragment.removeprefix("L"))
+    lines = (_REPO_ROOT / path).read_text(encoding="utf-8").splitlines()
+
+    return "\n".join(lines[first - 1 : first - 1 + count])
+
+
+def test_resolves_a_class_to_the_line_it_is_declared_on() -> None:
+    url = resolve_source_url("ragsage.query.QueryEngine")
+
+    assert url is not None
+    assert url.startswith(f"{_BLOB_PREFIX}src/ragsage/query.py#L")
+    assert _source_at(url) == "class QueryEngine:"
+
+
+def test_resolves_a_method_to_the_line_it_is_declared_on() -> None:
+    """A method resolves through its class, and lands inside the class body."""
+    url = resolve_source_url("ragsage.query.QueryEngine.query")
+
+    assert url is not None
+    assert url.startswith(f"{_BLOB_PREFIX}src/ragsage/query.py#L")
+    assert _source_at(url) == "    async def query("
+
+
+def test_resolves_a_module_level_function_to_the_line_it_is_declared_on() -> None:
+    url = resolve_source_url("ragsage.query.reciprocal_rank_fusion")
+
+    assert url is not None
+    assert url.startswith(f"{_BLOB_PREFIX}src/ragsage/query.py#L")
+    assert _source_at(url).startswith("def reciprocal_rank_fusion(")
+
+
+def test_resolves_a_decorated_function_to_its_own_file() -> None:
+    """The trap that made the unwrap in ``resolve_source_url`` one call, not two.
+
+    ``getsourcelines`` unwraps a decorated object internally and ``getsourcefile``
+    does not, so asking them separately about an ``@asynccontextmanager`` pairs a
+    line number in ``storage/session.py`` with a filename of ``contextlib.py`` —
+    a link that resolves, to a line of somebody else's standard library.
+    """
+    url = resolve_source_url("ragsage.storage.open_scoped_session")
+
+    assert url is not None
+    assert url.startswith(f"{_BLOB_PREFIX}src/ragsage/storage/session.py#L")
+    assert _source_at(url, count=2) == "@asynccontextmanager\nasync def open_scoped_session("
+
+
+def test_returns_none_for_a_dataclass_field() -> None:
+    """A field is an annotation, not an object: there is nothing to locate."""
+    assert resolve_source_url("ragsage.storage.PostgresConfig.dsn") is None
+
+
+def test_returns_none_for_an_enum_member() -> None:
+    """A member is a value, and a value has forgotten where it came from."""
+    assert resolve_source_url("ragsage.parsing.DocumentFormat.PDF") is None
+
+
+def test_returns_none_for_a_name_that_does_not_exist() -> None:
+    """Guards the import walk: a typo must not raise out of a documentation build."""
+    assert resolve_source_url("ragsage.query.NoSuchThing") is None
 
 
 # ---------------------------------------------------------------------------- #
