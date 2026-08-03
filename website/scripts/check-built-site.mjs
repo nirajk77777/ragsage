@@ -186,22 +186,51 @@ notes.push(`${checkedLinks} internal links (${checkedFragments} anchored) resolv
 const apiPages = [...pages].filter(([route]) => route === '/api' || route.startsWith('/api/'));
 canary(apiPages.length > 0, 'no API reference pages were built');
 
+/**
+ * Signatures, and nothing else on the page.
+ *
+ * The generator emits every signature as a Markdown heading and confines its
+ * repair to heading lines, on the grounds that a docstring is free to contain
+ * `, ,` in a prose aside or a code sample — worth leaving alone rather than
+ * corrupting prose to fix signatures. Scanning whole-page HTML here would put
+ * this gate in direct conflict with that: a docstring exercising the exemption
+ * would fail the deploy with nothing able to correct it.
+ *
+ * Scoping to `h2`–`h6` matches the generator's own `^#{2,6} ` filter, so the two
+ * range over the same corpus and the counts below can be compared exactly. Page
+ * titles are lifted into frontmatter and render as `h1`, which holds no
+ * signature; the rendered payload repeats each heading roughly four times, in
+ * the table of contents and the router data, which is what made the old
+ * whole-page count read 140 against a manifest of 35.
+ */
+const signatureHeadings = ([, page]) =>
+  [...page.html.matchAll(/<h([2-6])\b[^>]*>([\s\S]*?)<\/h\1>/g)].map((match) => match[0]);
+
+const headingCount = apiPages.reduce((total, entry) => total + signatureHeadings(entry).length, 0);
+canary(headingCount > 0, 'no headings were found on the API pages, so no signature was scanned');
+canary(manifest.markersRestored > 0, 'the generator restored no keyword-only markers');
+
 let restored = 0;
-for (const [route, page] of apiPages) {
-  const artefacts = page.html.match(/, , |\(, /g);
+for (const entry of apiPages) {
+  const [route] = entry;
+  const headings = signatureHeadings(entry).join('\n');
+  const artefacts = headings.match(/, , |\(, /g);
   check(
     artefacts === null,
     `${route}: ${artefacts?.length} signature(s) still show the eaten keyword-only marker`,
   );
-  restored += (page.html.match(/, \*, |\(\*, /g) ?? []).length;
+  restored += (headings.match(/, \*, |\(\*, /g) ?? []).length;
 }
 
-canary(
-  restored >= manifest.markersRestored,
-  `the generator restored ${manifest.markersRestored} keyword-only markers but only ${restored} ` +
-    'reached the built site, so "no artefacts" may just mean "no signatures"',
+// Exactly, not at least. Both corpora are now the same set of signatures, so a
+// drift either way is a defect: too few means markers were lost between the
+// generator and the served page, too many means something else is being counted.
+check(
+  restored === manifest.markersRestored,
+  `the generator restored ${manifest.markersRestored} keyword-only markers but ${restored} ` +
+    'appear in the built signatures',
 );
-notes.push(`${restored} keyword-only markers survive into the built pages`);
+notes.push(`${restored} keyword-only markers survive into the built signatures`);
 
 // ---------------------------------------------------------------------------- #
 // 4. Every documented object still has its source link
