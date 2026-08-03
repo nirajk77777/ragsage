@@ -1,0 +1,61 @@
+name: Docs
+
+# Its own workflow rather than a job in `ci.yml`, because GitHub filters paths
+# per workflow and not per job, and this is the only part of CI worth skipping:
+# generating the API reference pulls Sphinx and its dependency tree, and building
+# the site pulls npm's.
+#
+# The filter is a **deny-list**, and deliberately so. An allow-list that forgets
+# an input does not fail — it silently stops checking, which is how a broken docs
+# build merges green. The spec makes the same call for the deployment host's
+# Watch Paths: a mis-specified glob is far worse than a redundant rebuild. So the
+# entries below are only paths that provably cannot reach the image: the
+# Dockerfile copies `pyproject.toml`, `uv.lock`, `README.md`, `src/`, `api-src/`,
+# `tools/` and `website/`, and nothing listed is any of them. Anything added to
+# the repository later builds the docs until someone argues otherwise.
+#
+# `src/` is *not* listed, and must not be: the API reference is generated from
+# its docstrings, so a docstring edit changes the site and a broken `:class:`
+# target there is exactly what this gate exists to catch.
+#
+# The two lists are duplicated because GitHub's workflow parser does not support
+# YAML anchors. They must be kept identical — a path skipped on push but built on
+# pull request only moves the rebuild, and the reverse lets it merge unchecked.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'tests/**'
+      - 'examples/**'
+      - 'docs/**' # Release notes and agent guides; `api-src/` is the Sphinx input.
+      - '.github/workflows/ci.yml'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'CLAUDE.md'
+      - 'LICENSE'
+  pull_request:
+    paths-ignore:
+      - 'tests/**'
+      - 'examples/**'
+      - 'docs/**'
+      - '.github/workflows/ci.yml'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'CLAUDE.md'
+      - 'LICENSE'
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same Dockerfile the deployment host builds, from the same repository
+      # root context — so a green pull request cannot produce a broken deploy.
+      # Everything that could fail fails inside it: a broken `:class:` target
+      # stops the Sphinx stage, and a dead link, a lost keyword-only marker or a
+      # missing source link stops the gate in the Node stage.
+      #
+      # The image is not pushed anywhere. Building it *is* the check.
+      - name: Build the documentation image
+        run: docker build -f website/Dockerfile -t ragsage-docs .

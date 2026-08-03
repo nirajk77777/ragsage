@@ -30,6 +30,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+import yaml
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # The application itself, and the two directories it grows at rest. `node_modules`
@@ -133,4 +135,79 @@ def test_no_reference_to_read_the_docs_survives() -> None:
     assert not offenders, (
         "these files still point at the retired documentation site, which no longer exists "
         f"and cannot redirect: {offenders}"
+    )
+
+
+# ---------------------------------------------------------------------------- #
+# The docs gate cannot be skipped for a change that reaches it
+# ---------------------------------------------------------------------------- #
+
+_DOCS_WORKFLOW = _REPO_ROOT / ".github/workflows/docs.yml"
+_DOCKERFILE = _REPO_ROOT / "website/Dockerfile"
+
+
+def _docs_ignore_lists() -> list[list[str]]:
+    """The `paths-ignore` list under every trigger in the docs workflow."""
+    workflow = yaml.safe_load(_DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    # `on:` is YAML 1.1 truthy, so PyYAML reads the key as the boolean `True`.
+    triggers = workflow.get("on", workflow.get(True))
+    # A trigger with no body at all (`pull_request:`) parses as `None`.
+    return [(trigger or {}).get("paths-ignore", []) for trigger in triggers.values()]
+
+
+def _image_inputs() -> set[str]:
+    """Top-level paths the documentation image copies out of the repository.
+
+    Read from the Dockerfile rather than restated, so a new `COPY` is covered the
+    day it lands instead of the day someone remembers this test. Stage-to-stage
+    copies are skipped: they carry what an earlier stage built, not repository
+    files, and their sources do not exist here.
+    """
+    inputs = set()
+    for line in _DOCKERFILE.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("COPY ") or "--from=" in stripped:
+            continue
+        # `COPY <src>... <dest>` — every argument but the last is a source.
+        for source in stripped.split()[1:-1]:
+            inputs.add(source.rstrip("/").split("/")[0])
+    return inputs
+
+
+def test_the_docs_gate_is_not_skipped_for_its_own_inputs() -> None:
+    """A deny-list that names an input silently stops checking it.
+
+    The docs workflow skips the image build for changes that cannot reach it. The
+    filter is a deny-list precisely so that forgetting a path costs a redundant
+    rebuild rather than an unrun gate — but that only holds while nothing the
+    image actually consumes appears in it. `src/` is the one to watch: the API
+    reference is generated from its docstrings, so it looks like library code and
+    is in fact the gate's principal input.
+
+    A mismatch between the triggers is the same failure wearing a disguise: a path
+    ignored on push but built on pull request merely moves the rebuild, while the
+    reverse lets a broken docs build merge unchecked.
+    """
+    ignore_lists = _docs_ignore_lists()
+    inputs = _image_inputs()
+
+    # Canaries: an empty filter forbids nothing, and an empty input set is
+    # satisfied by any filter at all.
+    assert len(ignore_lists) == 2, (
+        f"expected a filter on push and on pull_request, found {len(ignore_lists)}"
+    )
+    assert all(ignore_lists), "the docs workflow declares an empty paths-ignore list"
+    assert {"src", "website", "api-src", "tools"} <= inputs, (
+        f"the Dockerfile no longer copies the API reference inputs; found {sorted(inputs)}"
+    )
+
+    first, *rest = ignore_lists
+    assert all(other == first for other in rest), (
+        f"the docs workflow's triggers filter different paths: {ignore_lists}"
+    )
+
+    smuggled = sorted(pattern for pattern in first if pattern.rstrip("/*").rstrip("/") in inputs)
+    assert not smuggled, (
+        "these paths are copied into the documentation image but excluded from the "
+        f"workflow that builds it, so changing them would skip the gate: {smuggled}"
     )

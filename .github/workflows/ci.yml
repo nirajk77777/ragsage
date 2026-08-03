@@ -42,20 +42,7 @@ jobs:
           uv run python examples/custom_parser.py
           uv run python examples/assembled_engine.py
 
-  # The docs site. Its own job: generating the API reference pulls Sphinx and its
-  # dependency tree, and building the site pulls npm's, neither of which has any
-  # business slowing down the gate that has to pass on every push.
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # The same Dockerfile the deployment host builds, from the same repository
-      # root context — so a green pull request cannot produce a broken deploy.
-      # Everything that could fail fails inside it: a broken `:class:` target
-      # stops the Sphinx stage, and a dead link, a lost keyword-only marker or a
-      # missing source link stops the gate in the Node stage.
-      #
-      # The image is not pushed anywhere. Building it *is* the check.
-      - name: Build the documentation image
-        run: docker build -f website/Dockerfile -t ragsage-docs .
+# The docs site is built and gated by `docs.yml`. It lives in its own workflow so
+# that it can be skipped for changes that cannot reach it — GitHub filters paths
+# per workflow, not per job — and so its Sphinx and npm dependency trees never
+# slow down the gate that has to pass on every push.
