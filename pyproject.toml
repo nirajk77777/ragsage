@@ -124,6 +124,12 @@ dev = [
     # sdist and look inside it. A build frontend normally fetches this into an
     # isolated environment; a test that asserts over the artifact needs it here.
     "hatchling>=1.27",
+    # The same test reads the CI workflows, to check the docs gate is not
+    # filtered out for a path the documentation image consumes. Already present
+    # transitively, and named anyway: a guard resting on someone else's
+    # dependency tree breaks when that tree changes, for a reason nowhere near
+    # the test.
+    "pyyaml>=6.0",
 ]
 
 # The API-reference generator. Sphinx is no longer the documentation site — that
