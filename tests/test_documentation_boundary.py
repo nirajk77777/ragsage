@@ -1,6 +1,6 @@
 """The documentation site stays out of the Python package, and stays one site.
 
-Two invariants, both structural, both easy to break by accident and impossible to
+Three invariants, all structural, all easy to break by accident and impossible to
 notice once broken.
 
 **The site is not part of the distribution.** ``website/`` is a Next.js
@@ -17,6 +17,13 @@ host therefore does not merely point somewhere stale — it points at a project 
 no longer exists, from a repository that is the canonical source of truth about
 where the documentation lives. That is worse than no link.
 
+**The release notes have one home, and it is not here.** Their canonical home is
+the GitHub releases page, which is generated from the tag that publishes the
+package. A copy on the documentation site would be a second home that nothing
+updates: the release that adds a note to GitHub does not rebuild this site, so the
+copy is stale from the release after the one that created it — and it is the copy
+a reader lands on, because it is the one with a documentation URL.
+
 Each assertion has a canary, for the reason the whole documentation gate does:
 "no forbidden file in the sdist" is trivially true of an sdist that failed to
 build, and "no forbidden string in the repository" is trivially true of a search
@@ -25,6 +32,7 @@ that matched no files.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tarfile
@@ -135,6 +143,62 @@ def test_no_reference_to_read_the_docs_survives() -> None:
     assert not offenders, (
         "these files still point at the retired documentation site, which no longer exists "
         f"and cannot redirect: {offenders}"
+    )
+
+
+# ---------------------------------------------------------------------------- #
+# The release notes are linked, not copied
+# ---------------------------------------------------------------------------- #
+
+_RELEASE_NOTES = _REPO_ROOT / "docs/release-notes"
+_SITE_CONTENT = _REPO_ROOT / "website/content"
+_RELEASES_PAGE = "github.com/nirajk77777/ragsage/releases"
+
+
+def test_the_site_links_the_release_notes_rather_than_serving_them() -> None:
+    """One home for the release notes, and the site points at it.
+
+    Both halves matter, and only together. Excluding the notes without naming
+    where they went leaves a reader on a documentation site with no way to find
+    out what changed in a version — which is the pressure that would put a copy
+    here in the first place.
+
+    Structural, over what the repository holds: prose is authored by hand, so the
+    way this breaks is somebody copying a note in, not the build emitting one.
+    """
+    notes = sorted(_RELEASE_NOTES.glob("v*.md"))
+    pages = sorted(_SITE_CONTENT.rglob("*.mdx"))
+
+    # Canaries. "The site serves no release note" is trivially true when none has
+    # been written, and "some page links to the releases page" cannot be believed
+    # of a search that found no pages to read.
+    assert notes, f"no release notes were found under {_RELEASE_NOTES}, so nothing is excluded"
+    assert pages, f"no prose pages were found under {_SITE_CONTENT}, so nothing was searched"
+
+    # A copied note arrives one of two ways: the directory comes with it, or the
+    # file keeps the version-stamped name it had. Both are read *inside the content
+    # tree* — an absolute path would answer for the checkout's own ancestry, and a
+    # clone under a directory called `release-notes` would fail this for no reason.
+    #
+    # The name pattern mirrors the notes themselves rather than anything starting
+    # with a `v`: `releasing.mdx` is the guide to *cutting* a release and belongs
+    # here, and so would a `v2-migration.mdx` that is prose about a version rather
+    # than the notes for one.
+    served = [
+        page
+        for page in pages
+        if "release-notes" in page.relative_to(_SITE_CONTENT).parts
+        or re.fullmatch(r"v\d+(?:\.\d+)*", page.stem)
+    ]
+    assert not served, (
+        "these pages would serve the release notes from the documentation site, whose "
+        f"canonical home is the releases page: {[str(page) for page in served]}"
+    )
+
+    linked = [page for page in pages if _RELEASES_PAGE in page.read_text(encoding="utf-8")]
+    assert linked, (
+        f"no page links to {_RELEASES_PAGE}, so the release notes were excluded from the "
+        "site without the site saying where they went"
     )
 
 

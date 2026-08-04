@@ -76,22 +76,32 @@ function routeOf(file) {
 const htmlFiles = walk(outDir).filter((file) => file.endsWith('.html'));
 const pages = new Map();
 
+/**
+ * Every link in a fragment of markup.
+ *
+ * Only `<a href>`: `data-href` is used by the UI library for stylesheet
+ * deduplication, and React hoists stylesheets by putting an `href` on a `<style>`
+ * tag. Neither points at anything navigable.
+ */
+function hrefsIn(html) {
+  return [...html.matchAll(/<a\b[^>]*?\shref="([^"]*)"/g)].map((match) => match[1]);
+}
+
 for (const file of htmlFiles) {
   const route = routeOf(file);
   if (NON_CONTENT_PAGES.has(route)) continue;
   const html = readFileSync(file, 'utf8');
+  // The page's own content. Everything the layout wraps around it — the sidebar,
+  // the table of contents — is the site's, and belongs to no page in particular.
+  // Empty if the layout ever stops using `<article>`, which is what the canaries
+  // over this corpus are there to notice.
+  const article = /<article\b[\s\S]*?<\/article>/.exec(html)?.[0] ?? '';
   pages.set(route, {
     html,
-    // Only `<a href>`: `data-href` is used by the UI library for stylesheet
-    // deduplication and points at nothing navigable.
-    links: [...html.matchAll(/<a\b[^>]*?\shref="([^"]*)"/g)].map((match) => match[1]),
+    article,
+    links: hrefsIn(html),
     ids: new Set([...html.matchAll(/\sid="([^"]*)"/g)].map((match) => match[1])),
-    // Headings inside the `<article>`, which is the page's own content —
-    // everything the layout wraps around it, the table of contents included,
-    // carries headings that belong to the site rather than to the page.
-    headingIds: [...(/<article\b[\s\S]*?<\/article>/.exec(html)?.[0] ?? '').matchAll(
-      /<h[2-6]\b[^>]*\sid="([^"]*)"/g,
-    )].map((match) => match[1]),
+    headingIds: [...article.matchAll(/<h[2-6]\b[^>]*\sid="([^"]*)"/g)].map((match) => match[1]),
   });
 }
 
@@ -100,6 +110,27 @@ const hasAnchor = (page, fragment) => page.ids.has(decodeURIComponent(fragment))
 
 /** The generated reference: `/api` is the folder's own page, not a page above it. */
 const isApiRoute = (route) => route === '/api' || route.startsWith('/api/');
+
+/** Whether an href points somewhere on this site at all. */
+const isInternalHref = (href) =>
+  !isIgnorableHref(href) && !/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith('//');
+
+/**
+ * The route an href on `from` leads to, exactly as a browser would resolve it —
+ * which is why routes must not gain a trailing slash. `models` from `/api/ports`
+ * is `/api/models`; from `/api/ports/` it would be `/api/ports/models`, and every
+ * cross-page link in the reference would 404.
+ */
+function resolveHref(from, href) {
+  const [path, fragment] = href.split('#');
+  const target =
+    path === ''
+      ? from
+      : path.startsWith('/')
+        ? path
+        : posix.normalize(posix.join(dirname(from), path));
+  return { target: target === '/.' ? '/' : target, fragment };
+}
 
 canary(pages.size > 0, `no pages were built into ${outDir}/`);
 
@@ -150,25 +181,12 @@ let checkedFragments = 0;
 
 for (const [route, page] of pages) {
   for (const href of page.links) {
-    if (isIgnorableHref(href) || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')) {
-      continue;
-    }
+    if (!isInternalHref(href)) continue;
 
-    const [path, fragment] = href.split('#');
-    // Relative hrefs resolve against the route, exactly as a browser resolves
-    // them — which is why routes must not gain a trailing slash. `models` from
-    // `/api/ports` is `/api/models`; from `/api/ports/` it would be
-    // `/api/ports/models`, and every cross-page link in the reference would 404.
-    const target =
-      path === ''
-        ? route
-        : path.startsWith('/')
-          ? path
-          : posix.normalize(posix.join(dirname(route), path));
-
+    const { target, fragment } = resolveHref(route, href);
     checkedLinks += 1;
 
-    const targetPage = pages.get(target === '/.' ? '/' : target);
+    const targetPage = pages.get(target);
     if (!targetPage) {
       failures.push(`${route}: link to ${href} resolves to ${target}, which is not a page`);
       continue;
@@ -295,8 +313,123 @@ for (const route of pages.keys()) {
 
 canary(navigated.size > 0, 'navigation lists no pages at all');
 
+// The front page's job is to get a first-time reader running, and the sidebar is
+// not that: it lists everything at once and says nothing about where to start.
+// Navigation being *complete* is what the checks above establish, which is
+// exactly the state in which this one can quietly stop being true.
+//
+// Resolved rather than string-matched, so a relative `quickstart` counts — the
+// question is where the reader lands, not how the href was spelled.
+const frontPage = pages.get('/');
+canary(frontPage !== undefined, 'no front page was built, so nothing was asked about it');
+check(
+  frontPage?.links
+    .filter(isInternalHref)
+    .some((href) => resolveHref('/', href).target === '/quickstart'),
+  'the front page carries no link to /quickstart, so the first thing to do is a page away',
+);
+
 // ---------------------------------------------------------------------------- #
-// 6. Search reaches the generated reference
+// 6. No page still shows the dialect it was converted from
+// ---------------------------------------------------------------------------- #
+
+/**
+ * The prose was MyST inside a Sphinx tree, and the reference is generated from
+ * docstrings that are still written in Sphinx's dialect. Both arrive here through
+ * a translation, and both translations fail the same way: the syntax survives as
+ * literal text. A page reading ``{class}`Scope``` or ``:::{note}`` is not a
+ * broken link and not a missing page — it renders, it is navigable, it is
+ * indexed, and every other check here passes over it.
+ *
+ * This is the one check that would have to change the day a page needs to *show*
+ * this syntax rather than use it. That page would be documenting Sphinx, and it
+ * would need somewhere to say so; nothing here is that page today.
+ */
+/**
+ * Only the artefacts that can reach a built page. Two of the four shapes the
+ * conversion had to remove cannot: a brace in `.mdx` is a JavaScript expression,
+ * so a surviving `{class}` fails the MDX parse, and a fenced ```` ```{toctree} ````
+ * fails Shiki, which refuses a language it does not have. Both were tried against
+ * this site. What is left are the two that render quietly — a role on a generated
+ * `.md` page, where braces stay literal, and a colon-fenced block anywhere.
+ *
+ * Each pattern is anchored on what the syntax renders *as*, not on the words in
+ * it: a role survives as its brace or colon pair pressed against the code span it
+ * was meant to link, `{class}<code>Scope</code>`. Requiring that neighbour is what
+ * separates a leftover from a page that says `{data}` in a template or writes a
+ * sentence about `:maxdepth:` — a page about this migration would do both.
+ */
+const DIALECT_ARTEFACTS = [
+  ['a MyST cross-reference role', /\{(?:py:)?(?:class|func|meth|mod|attr|data|exc|obj|const|ref|doc|term)\}(?=<code|`)/],
+  ['a Sphinx cross-reference role', /:(?:py:)?(?:class|func|meth|mod|attr|data|exc|obj|const|ref|doc|term):(?=<code|`)/],
+  ['a MyST directive block', /:::\{[a-z]/],
+];
+
+const prosePages = [...pages].filter(([route]) => !isApiRoute(route));
+const contentless = [...pages].filter(([, page]) => page.article === '').map(([route]) => route);
+
+// Two canaries, because two things can empty this corpus. A layout that stops
+// wrapping content in `<article>` leaves every page scanning an empty string,
+// which passes silently for every pattern on every page — and it is a layout
+// change, so nothing about the content would look wrong that day. Per page rather
+// than in total: one page's worth of markup is enough to satisfy any threshold
+// while the other ten scan nothing.
+canary(
+  prosePages.length > 0,
+  'no hand-written pages were built, so nothing converted from MyST was scanned',
+);
+canary(
+  contentless.length === 0,
+  `no <article> content was found to scan on ${contentless.length} page(s): ${contentless.slice(0, 5)}`,
+);
+
+for (const [route, page] of pages) {
+  for (const [label, pattern] of DIALECT_ARTEFACTS) {
+    const found = pattern.exec(page.article);
+    check(
+      found === null,
+      `${route}: rendered page still shows ${label} — "${page.article
+        .slice(Math.max(0, (found?.index ?? 0) - 40), (found?.index ?? 0) + 60)
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()}"`,
+    );
+  }
+}
+
+// The prose is where the roles were, and it is also where a lost cross-reference
+// is invisible: the sentence still reads. Section 2 proves these links resolve —
+// this proves there are still links to resolve. Both directions, because the
+// reference contributes some 1700 links of its own and would carry section 2's
+// canaries alone while every link between prose pages quietly went missing.
+// From the article, not the whole page: the sidebar links every page to every
+// other one and is on all of them, so counting it would answer this question with
+// the navigation's links no matter what the prose itself said.
+const proseLinks = prosePages.flatMap(([route, page]) =>
+  hrefsIn(page.article)
+    .filter(isInternalHref)
+    .map((href) => ({ from: route, ...resolveHref(route, href) })),
+);
+const intoReference = proseLinks.filter((link) => isApiRoute(link.target) && link.fragment).length;
+// To another page, not to a heading on this one. Every page carries a link per
+// heading, so counting those would keep this canary green over prose that had
+// stopped referring to itself entirely.
+const betweenProse = proseLinks.filter(
+  (link) => !isApiRoute(link.target) && link.target !== link.from,
+).length;
+
+canary(
+  intoReference > 0,
+  'no prose page links into the API reference, so section 2 proved nothing about prose',
+);
+canary(betweenProse > 0, 'no prose page links to another, so section 2 proved nothing about them');
+notes.push(
+  `${pages.size} pages carry no unconverted syntax (${prosePages.length} of them hand-written, ` +
+    `linking ${betweenProse} times to each other and ${intoReference} into the reference)`,
+);
+
+// ---------------------------------------------------------------------------- #
+// 7. Search reaches the generated reference
 // ---------------------------------------------------------------------------- #
 
 /**
