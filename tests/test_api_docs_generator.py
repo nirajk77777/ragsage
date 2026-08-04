@@ -37,14 +37,26 @@ file and a line is the half that can be quietly wrong — a plausible URL that
 lands on the wrong line reads as a working link — so those tests take the URL the
 generator produced, open the checked-in file at the line it names, and assert the
 object is declared there.
+
+**What the run writes, and in what order.** The last two sections leave the
+transforms and take the page-writing step whole, against a stand-in for the raw
+Sphinx build. Two of this pipeline's decisions live there and nowhere else: that
+the generator owns one directory and cannot reach a hand-written page outside it,
+and that the five layers are navigated in the order the engine is assembled in.
+Both are invisible to the built-site gate, which checks that navigation and
+content agree — not who wrote them, and not what order they are in.
 """
 
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 from tools.generate_api_docs import (
+    _DESCRIPTIONS,
+    _OUTPUT_DIR,
+    _write_pages,
     add_frontmatter,
     count_eaten_markers,
     inject_source_links,
@@ -452,3 +464,135 @@ def test_falls_back_to_no_title_when_a_page_has_no_heading() -> None:
 
     assert "title:" not in front
     assert "Just a paragraph." in front
+
+
+# ---------------------------------------------------------------------------- #
+# Where the run is allowed to write
+# ---------------------------------------------------------------------------- #
+
+
+def _raw_build(root: Path) -> Path:
+    """A stand-in for the directory ``sphinx-markdown-builder`` leaves behind.
+
+    One page per stem the generator knows how to describe, read off the generator
+    itself: the writing step refuses a set it cannot order or describe, and a
+    hard-coded six here would fail on that rather than on what the test is about
+    the day a seventh page is documented.
+    """
+    raw = root / "raw"
+    raw.mkdir()
+    for stem in _DESCRIPTIONS:
+        (raw / f"{stem}.md").write_text(f"# {stem.title()}\n\nBody.\n", encoding="utf-8")
+    return raw
+
+
+def test_the_directory_it_wipes_holds_no_hand_written_page() -> None:
+    """The two tests below take the destination as an argument. This one pins it.
+
+    They establish that the writing step stays inside whatever directory it is
+    handed — which is the whole of the confinement *given a correct destination*,
+    and none of it if the constant moves. Point ``_OUTPUT_DIR`` one level up at the
+    prose tree and both still pass, while the ``rmtree`` at the top of the run
+    deletes every hand-written page on its way to writing the reference.
+
+    Read off the checked-in tree rather than the constant restated: prose is
+    ``.mdx`` and the generated reference is ``.md``, so "no hand-written page lives
+    where the generator wipes" is a question the repository can answer.
+    """
+    prose = sorted(_OUTPUT_DIR.parent.rglob("*.mdx"))
+
+    # The canary. The claim below is trivially true of a tree with no prose in it
+    # — as this one would look if the content directory were ever moved and this
+    # test left pointing at where it used to be.
+    assert prose, (
+        f"no hand-written pages were found under {_OUTPUT_DIR.parent}, so this test "
+        "proves nothing about what the generator can reach"
+    )
+
+    inside = [page for page in prose if _OUTPUT_DIR in page.parents]
+    assert not inside, (
+        f"{len(inside)} hand-written page(s) live under {_OUTPUT_DIR}, which the "
+        f"generator wipes on every run: {[str(page) for page in inside]}"
+    )
+
+
+def test_writes_nothing_outside_the_directory_it_owns(tmp_path: Path) -> None:
+    """Prose sits one level up from the generated reference, and must survive a run.
+
+    The two live in the same tree so that search and navigation range over one
+    content source, which is what puts a hand-written page within reach of a
+    generator that wipes before it writes. Nothing at the far end would report the
+    loss: a clobbered page leaves a site that builds, links and navigates
+    perfectly well with a page missing from it.
+    """
+    content = tmp_path / "content"
+    (content / "api").mkdir(parents=True)
+    (content / "quickstart.mdx").write_text("hand-written\n", encoding="utf-8")
+    (content / "meta.json").write_text('{"pages": ["quickstart"]}\n', encoding="utf-8")
+
+    _write_pages(_raw_build(tmp_path), content / "api")
+
+    # The canary. A step that wrote nothing at all would leave every neighbour
+    # below intact, and prove only that it did nothing.
+    assert (content / "api" / "models.md").exists()
+
+    assert sorted(path.name for path in content.iterdir()) == [
+        "api",
+        "meta.json",
+        "quickstart.mdx",
+    ]
+    assert (content / "quickstart.mdx").read_text(encoding="utf-8") == "hand-written\n"
+    assert (content / "meta.json").read_text(encoding="utf-8") == '{"pages": ["quickstart"]}\n'
+
+
+def test_wipes_its_own_directory_so_a_retired_page_cannot_linger(tmp_path: Path) -> None:
+    """The other half of owning it: a page renamed upstream must not be served forever.
+
+    Merging would leave the old file behind, navigated by nothing, linked by
+    nothing, and served to anyone still holding its URL — a page that says what
+    the docstrings used to say, with no way to tell from the site that it is
+    stale.
+    """
+    output = tmp_path / "api"
+    output.mkdir()
+    (output / "retired.md").write_text("what the docstrings used to say\n", encoding="utf-8")
+
+    _write_pages(_raw_build(tmp_path), output)
+
+    # The canary again: a step that wrote nothing would leave a directory holding
+    # only the retired page, and the assertion below would be the one that failed.
+    assert (output / "models.md").exists()
+
+    assert not (output / "retired.md").exists()
+
+
+# ---------------------------------------------------------------------------- #
+# The order the reference is read in
+# ---------------------------------------------------------------------------- #
+
+
+def test_navigates_the_five_layers_in_the_order_the_engine_is_assembled(tmp_path: Path) -> None:
+    """Façades, ports, models, configuration, adapters — read top to bottom.
+
+    What you call, what it calls through, what flows across it, what configures
+    it, what implements it. The order is the argument: it teaches the architecture
+    to someone reading the sidebar down. Alphabetical would open on the adapters,
+    which is the one layer a reader is free to ignore.
+
+    Spelled out rather than compared against the generator's own tuple, which
+    would restate the ordering from the thing being ordered and hold for any
+    order at all.
+    """
+    output = tmp_path / "api"
+
+    _write_pages(_raw_build(tmp_path), output)
+
+    meta = json.loads((output / "meta.json").read_text(encoding="utf-8"))
+    assert meta["pages"] == [
+        "index",
+        "facades",
+        "ports",
+        "models",
+        "configuration",
+        "adapters",
+    ]

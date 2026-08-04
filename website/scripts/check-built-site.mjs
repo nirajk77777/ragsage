@@ -86,8 +86,20 @@ for (const file of htmlFiles) {
     // deduplication and points at nothing navigable.
     links: [...html.matchAll(/<a\b[^>]*?\shref="([^"]*)"/g)].map((match) => match[1]),
     ids: new Set([...html.matchAll(/\sid="([^"]*)"/g)].map((match) => match[1])),
+    // Headings inside the `<article>`, which is the page's own content —
+    // everything the layout wraps around it, the table of contents included,
+    // carries headings that belong to the site rather than to the page.
+    headingIds: [...(/<article\b[\s\S]*?<\/article>/.exec(html)?.[0] ?? '').matchAll(
+      /<h[2-6]\b[^>]*\sid="([^"]*)"/g,
+    )].map((match) => match[1]),
   });
 }
+
+/** Whether an already-resolved page carries the anchor a link or result names. */
+const hasAnchor = (page, fragment) => page.ids.has(decodeURIComponent(fragment));
+
+/** The generated reference: `/api` is the folder's own page, not a page above it. */
+const isApiRoute = (route) => route === '/api' || route.startsWith('/api/');
 
 canary(pages.size > 0, `no pages were built into ${outDir}/`);
 
@@ -165,7 +177,7 @@ for (const [route, page] of pages) {
     if (fragment) {
       checkedFragments += 1;
       check(
-        targetPage.ids.has(decodeURIComponent(fragment)),
+        hasAnchor(targetPage, fragment),
         `${route}: link to ${href} resolves to ${target}, which has no #${fragment}`,
       );
     }
@@ -183,7 +195,7 @@ notes.push(`${checkedLinks} internal links (${checkedFragments} anchored) resolv
 // 3. No signature carries the eaten keyword-only marker
 // ---------------------------------------------------------------------------- #
 
-const apiPages = [...pages].filter(([route]) => route === '/api' || route.startsWith('/api/'));
+const apiPages = [...pages].filter(([route]) => isApiRoute(route));
 canary(apiPages.length > 0, 'no API reference pages were built');
 
 /**
@@ -282,6 +294,93 @@ for (const route of pages.keys()) {
 }
 
 canary(navigated.size > 0, 'navigation lists no pages at all');
+
+// ---------------------------------------------------------------------------- #
+// 6. Search reaches the generated reference
+// ---------------------------------------------------------------------------- #
+
+/**
+ * The prebuilt Orama index, exported as a file because the production image has
+ * no runtime to answer a query with.
+ *
+ * Nothing else here would notice search breaking. `staticGET` becoming `GET`, or
+ * a content source dropping out of the loader, leaves every page still built,
+ * still linked and still navigable — and the symbols on it findable only by
+ * someone who already knows which page holds them.
+ *
+ * Every heading, not every page. A page contributes its own title to the index
+ * whatever else goes wrong, so "each route appears" would pass over a reference
+ * indexed down to nothing but six page names. Conservation is the same standard
+ * sections 3 and 4 hold the generator to: what the site serves, the index knows.
+ */
+const searchIndexPath = join(outDir, 'api', 'search');
+
+let searchDocs = null;
+try {
+  const exported = JSON.parse(readFileSync(searchIndexPath, 'utf8'));
+  searchDocs = Object.values(exported.docs?.docs ?? {}).filter(Boolean);
+} catch (error) {
+  failures.push(`the search index at ${searchIndexPath} could not be read: ${error.message}`);
+}
+
+if (searchDocs !== null) {
+  canary(searchDocs.length > 0, 'the search index holds no documents');
+
+  /** Indexed headings, by the route they were indexed under. */
+  const indexedHeadings = new Map();
+  for (const entry of searchDocs) {
+    if (entry.type !== 'heading') continue;
+    const [route, fragment] = entry.url.split('#');
+    if (!fragment) continue;
+    if (!indexedHeadings.has(route)) indexedHeadings.set(route, new Set());
+    indexedHeadings.get(route).add(decodeURIComponent(fragment));
+  }
+
+  let apiHeadings = 0;
+  for (const [route, page] of pages) {
+    const indexed = indexedHeadings.get(route) ?? new Set();
+    if (isApiRoute(route)) apiHeadings += page.headingIds.length;
+
+    for (const id of page.headingIds) {
+      check(
+        indexed.has(id),
+        `${route} serves a heading at #${id} that search does not index, so the symbol it ` +
+          'names can only be found by a reader who already knows the page',
+      );
+    }
+  }
+
+  // Scoped to the reference, because that is the corpus the claim is about: the
+  // prose pages would carry this section past a run that indexed no API page at
+  // all, and a symbol on a generated page is precisely what a reader searches for.
+  canary(apiHeadings > 100, `only ${apiHeadings} headings were served by the API reference`);
+
+  // A result that lands nowhere is worse than no result — the reader concludes
+  // the symbol is undocumented. Slugs the site generates, a different set from
+  // the `<a id>` targets section 2 ranges over.
+  let checkedResultFragments = 0;
+  for (const entry of searchDocs) {
+    const [route, fragment] = entry.url.split('#');
+    if (!fragment) continue;
+
+    checkedResultFragments += 1;
+    const targetPage = pages.get(route);
+    if (!targetPage) {
+      failures.push(`search result ${entry.url} points at ${route}, which is not a page`);
+      continue;
+    }
+
+    check(
+      hasAnchor(targetPage, fragment),
+      `search result ${entry.url} points at ${route}, which has no #${fragment}`,
+    );
+  }
+
+  notes.push(
+    `${searchDocs.length} search entries index every served heading ` +
+      `(${checkedResultFragments} anchored results resolve)`,
+  );
+}
 
 // ---------------------------------------------------------------------------- #
 
