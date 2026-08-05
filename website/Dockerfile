@@ -25,7 +25,16 @@ WORKDIR /repo
 
 # The lockfile and the project metadata first, so a docstring edit does not
 # invalidate the dependency layer.
+#
+# `--no-install-project` is what makes that true. The API reference is generated
+# *from* `src/`, so `src/` is this stage's most-edited input by far — and with the
+# project installed in the same step, every docstring edit re-resolved Sphinx and
+# its dependency tree. Resolution depends on the lockfile alone, so it belongs in
+# a layer only the lockfile invalidates. The second sync then installs the project
+# itself against dependencies already present, which is a build, not a resolve.
 COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --locked --group docs --no-dev --no-install-project
+
 COPY src/ src/
 RUN uv sync --locked --group docs --no-dev
 
@@ -67,6 +76,11 @@ RUN npm run check
 FROM nginx:1.27-alpine AS runtime
 
 COPY website/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=site /website/out/ /usr/share/nginx/html/
+
+# Its own directory, rather than the document root nginx already populates, so
+# that what is served is the export and nothing else. `nginx.conf` names the same
+# path; the two are one decision, and `tests/test_documentation_image.py` keeps
+# them from drifting apart, since nothing brings them together until build time.
+COPY --from=site /website/out/ /srv/site/
 
 EXPOSE 80
