@@ -70,6 +70,17 @@ RUN npm run build
 # or partial build reports failure rather than a vacuous success.
 RUN npm run check
 
+# And the gate's own gate: the export is copied, one thing is broken in the copy,
+# and the gate is required to report that one thing by name. A build gate is
+# believed, which is exactly what makes a gate that has quietly lost the ability
+# to fail worse than none at all.
+#
+# It runs here, after the export exists, because it measures the gate against the
+# real artifact rather than a fixture — a fixture would be a second model of what
+# Next.js emits, and it would drift. That puts it in this stage rather than in the
+# Python test suite, which has no `out/` to break.
+RUN npm test
+
 # ---------------------------------------------------------------------------- #
 # Stage 3 — nginx, and nothing else
 # ---------------------------------------------------------------------------- #

@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "check": "node scripts/check-built-site.mjs out",
+    "test": "node --test 'scripts/*.test.mjs'",
     "types:check": "next typegen && tsc --noEmit"
   },
   "dependencies": {
