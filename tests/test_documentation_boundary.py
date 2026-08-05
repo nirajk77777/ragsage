@@ -1,6 +1,6 @@
 """The documentation site stays out of the Python package, and stays one site.
 
-Three invariants, all structural, all easy to break by accident and impossible to
+Four invariants, all structural, all easy to break by accident and impossible to
 notice once broken.
 
 **The site is not part of the distribution.** ``website/`` is a Next.js
@@ -10,6 +10,18 @@ library, and its sdist is what someone downloads to build and test it from
 source. Hatchling's sdist target is *deny-list* based: it ships everything not
 explicitly named, so a new top-level directory is included by default and the
 exclusion is the deliberate act. This is the guard on that act.
+
+Both directions are asserted, because a deny-list fails both ways. Excluding too
+little publishes a JavaScript application to the package index; excluding too
+much hands someone a download they cannot build or test, and that failure is the
+quieter of the two — nobody who has the repository ever sees it.
+
+**The repository is a Python project.** GitHub decides what a repository *is* by
+counting lines, and the site's TypeScript tree outweighs ``src/``. The count is
+not cosmetic: it drives the language shown on the repository, the search filters
+that surface it, and what a first-time reader assumes they are looking at. A
+``.gitattributes`` entry marking the site as documentation keeps the count
+honest, and the entry is one deleted line away from not existing.
 
 **There is only one documentation site.** The Sphinx site on Read the Docs was
 retired, and no redirects are possible from our side. A surviving link to the old
@@ -42,11 +54,24 @@ import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The application itself, and the two directories it grows at rest. `node_modules`
-# and `.next` are gitignored and hatchling honours VCS ignore, so they need no
-# exclusion of their own — but this test does not care *how* they are kept out,
-# only that they are. That is the point of asserting over the built artifact.
+# The application itself. This is the one thing `[tool.hatch.build.targets.sdist]`
+# has to name, and the only one of the three groups here whose absence is our own
+# doing.
 _FORBIDDEN_SDIST_PREFIXES = ("website/",)
+
+# Installed dependencies and build output, wherever they sit. Today they sit only
+# under `website/` — `website/.gitignore` anchors both patterns with a leading
+# slash — so the exclusion above already covers them and this assertion cannot be
+# the one that fails first. It is deliberately the outer boundary rather than the
+# guard on today's mechanism: it is what answers "the artifact ships no dependency
+# directory" for a *second* JavaScript toolchain, arriving somewhere the exclusion
+# list has no entry for, which is the shape this repository has grown once already.
+_FORBIDDEN_SDIST_COMPONENTS = ("node_modules", ".next")
+
+# What someone who downloads the sdist to build and test from source needs to
+# find in it: the library, its tests, and the four runnable examples the README
+# sends a reader to.
+_REQUIRED_SDIST_PREFIXES = ("src/ragsage/", "tests/", "examples/")
 
 # Concatenated at runtime so this guard does not match itself — the formatter
 # joins adjacent string literals, so that spelling would not survive `ruff format`.
@@ -74,17 +99,33 @@ def _build_sdist(destination: Path) -> Path:
 
 
 def test_the_sdist_contains_no_documentation_application(tmp_path: Path) -> None:
-    """A Python artifact ships Python, not a JavaScript app."""
+    """A Python artifact ships Python, not a JavaScript app.
+
+    Asserted over a freshly built sdist rather than over the exclusion list,
+    because the exclusion list is not the invariant — it is one of the mechanisms
+    that happen to produce it today, and the other two (hatchling's VCS-ignore
+    handling, and `.gitignore` itself) are not ours. Reading the list back would
+    only restate what `pyproject.toml` already says.
+
+    The required half runs first for the same reason: an sdist that excluded
+    `examples/` along with the site satisfies every "no JavaScript here"
+    assertion below, so a green from them means nothing until something has
+    established the artifact is the one we meant to build.
+    """
     with tarfile.open(_build_sdist(tmp_path)) as archive:
         # Strip the `ragsage-0.1.0/` prefix every sdist member carries.
         members = [name.split("/", 1)[1] for name in archive.getnames() if "/" in name]
 
-    # Canary: an sdist that shipped nothing would satisfy every assertion below.
-    assert any(name.startswith("src/ragsage/") for name in members), (
-        "the sdist contains no library source, so it proves nothing about what it excludes"
-    )
-    assert any(name.startswith("tests/") for name in members), (
-        "the sdist contains no tests, so the exclusion list is excluding too much"
+    # Canaries: an sdist that shipped nothing would satisfy every "not present"
+    # assertion below, and a failed build is the likeliest way to get one.
+    missing = [
+        prefix
+        for prefix in _REQUIRED_SDIST_PREFIXES
+        if not any(name.startswith(prefix) for name in members)
+    ]
+    assert not missing, (
+        "the sdist is missing what someone builds and tests the library from, so it "
+        f"proves nothing about what it excludes: {missing}"
     )
 
     smuggled = [
@@ -93,6 +134,13 @@ def test_the_sdist_contains_no_documentation_application(tmp_path: Path) -> None
         if any(name.startswith(prefix) for prefix in _FORBIDDEN_SDIST_PREFIXES)
     ]
     assert not smuggled, f"the sdist ships the documentation application: {smuggled[:10]}"
+
+    vendored = [
+        name
+        for name in members
+        if any(part in _FORBIDDEN_SDIST_COMPONENTS for part in name.split("/"))
+    ]
+    assert not vendored, f"the sdist ships installed dependencies or build output: {vendored[:10]}"
 
 
 def _tracked_files() -> list[str]:
@@ -143,6 +191,76 @@ def test_no_reference_to_read_the_docs_survives() -> None:
     assert not offenders, (
         "these files still point at the retired documentation site, which no longer exists "
         f"and cannot redirect: {offenders}"
+    )
+
+
+# ---------------------------------------------------------------------------- #
+# The repository still reads as a Python project
+# ---------------------------------------------------------------------------- #
+
+# What `git check-attr` reports for a path an attribute applies to. The other
+# three answers — `unset`, `unspecified`, and a custom value — all mean linguist
+# counts the file.
+_ATTRIBUTE_APPLIES = "set"
+
+
+def _documentation_attribute_by_path(paths: list[str]) -> dict[str, str]:
+    """Ask git what `linguist-documentation` resolves to for each path.
+
+    Asking git, rather than reading `.gitattributes` and matching the patterns
+    here, is what makes this a guard rather than a second implementation of
+    attribute resolution. Pattern precedence, a later line overriding an earlier
+    one, an ancestor `.gitattributes`, an entry that silently matches nothing —
+    all of it is answered the way the thing doing the counting will answer it.
+    """
+    result = subprocess.run(
+        ["git", "check-attr", "--stdin", "-z", "linguist-documentation"],
+        cwd=_REPO_ROOT,
+        input="".join(f"{path}\0" for path in paths),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    # NUL-separated triples: path, attribute, value, with a trailing separator.
+    fields = result.stdout.split("\0")[:-1]
+    return {fields[index]: fields[index + 2] for index in range(0, len(fields), 3)}
+
+
+def test_the_repository_still_reads_as_a_python_project() -> None:
+    """Asserted over resolved attributes, and in both directions.
+
+    Over resolved attributes because the fix is one line of `.gitattributes` and
+    the failure is what git makes of it: a pattern that matches nothing looks
+    exactly like a pattern that matches everything it should, right up until
+    something counts the files.
+
+    Both directions because marking the library as documentation along with the
+    site is the same misclassification arrived at from the other side — the
+    repository is then detected from everything except its own source — and an
+    over-broad pattern (`**` rather than `website/**`) is the plausible way to
+    write it.
+    """
+    tracked = _tracked_files()
+    site = [name for name in tracked if name.startswith("website/")]
+    library = [name for name in tracked if name.startswith("src/ragsage/")]
+
+    # Canaries: "every site file is marked" is trivially true of no site files,
+    # and so is "no library file is marked" of no library files.
+    assert site, "no tracked files under website/, so nothing was classified"
+    assert library, "no tracked files under src/ragsage/, so nothing was classified"
+
+    attributes = _documentation_attribute_by_path(site + library)
+
+    unmarked = [name for name in site if attributes.get(name) != _ATTRIBUTE_APPLIES]
+    assert not unmarked, (
+        "these documentation-site files count towards the repository's detected "
+        f"language, which would reclassify a Python library as JavaScript: {unmarked[:10]}"
+    )
+
+    miscounted = [name for name in library if attributes.get(name) == _ATTRIBUTE_APPLIES]
+    assert not miscounted, (
+        "these library files are marked as documentation, so the language the repository "
+        f"is detected as is counted from everything but its own source: {miscounted[:10]}"
     )
 
 
