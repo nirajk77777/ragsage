@@ -702,7 +702,10 @@ def test_a_new_warning_is_caught_among_the_tolerated_ones(tmp_path: Path) -> Non
     with pytest.raises(SystemExit) as raised:
         _check_warnings(warnings)
 
-    assert _NEW_WARNING in str(raised.value)
+    assert _NEW_WARNING in str(raised.value), (
+        "the generation failed without naming the warning that is not a known defect, which "
+        f"is the only line in the file the reader has to act on: {raised.value}"
+    )
     assert _KNOWN_DEFECT not in str(raised.value), (
         "the failure lists the defect the run corrects, which buries the one line the "
         "reader has to act on among 35 they must not"

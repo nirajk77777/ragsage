@@ -30,10 +30,10 @@ the site still fails the build, but a stage nothing depends on is *skipped
 entirely* by the builder — the gate would simply never run, and every build would
 be green.
 
-**Resolution is layered above source.** The one claim here that is not about the
-served surface, and the one with no observable symptom at all: getting it wrong
-costs minutes per deploy and breaks nothing, which is why nothing else would ever
-report it.
+**Resolution is layered above source.** The last of the claims about the discarded
+stages, and the one with no observable symptom at all: getting it wrong costs
+minutes per deploy and breaks nothing, which is why nothing else would ever report
+it.
 
 Each assertion is paired with a canary, for the reason the documentation gate is:
 "no stage installs Python" is trivially true of a Dockerfile that failed to parse,
@@ -130,10 +130,11 @@ def _stages_copied_from(instructions: list[str]) -> set[str]:
     builder resolves what the target stage needs and skips everything else.
     """
     return {
-        match.group(1)
+        flag.removeprefix("--from=")
         for line in instructions
-        for match in [re.search(r"--from=(\S+)", line)]
-        if match
+        if line.upper().startswith("COPY ")
+        for flag in line.split()[1:]
+        if flag.startswith("--from=")
     }
 
 

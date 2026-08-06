@@ -91,6 +91,19 @@ function gateOver(mutate = () => {}) {
   }
 }
 
+/** The gate failed, and said these things among others. */
+function assertReports(result, ...fragments) {
+  const { code, output } = result;
+  assert.equal(code, 1, `the gate passed over a site that is broken:\n${output}`);
+  for (const fragment of fragments) {
+    assert.ok(
+      output.includes(fragment),
+      `the gate failed, but never said "${fragment}":\n${output}`,
+    );
+  }
+  return result;
+}
+
 /**
  * The gate failed, and the mutation is the *whole* reason it failed.
  *
@@ -99,30 +112,13 @@ function gateOver(mutate = () => {}) {
  * reporting a second, unrelated failure on every run would satisfy "exits
  * non-zero" and "mentions the link" forever, and this file would never notice.
  */
-function assertSoleProblem({ code, output }, ...fragments) {
-  assert.equal(code, 1, `the gate passed over a site that is broken:\n${output}`);
+function assertSoleProblem(result, ...fragments) {
+  const { output } = assertReports(result, ...fragments);
   assert.match(
     output,
     /\n1 problem\(s\) with the built site/,
     `one thing was broken, but the gate reported more or fewer:\n${output}`,
   );
-  for (const fragment of fragments) {
-    assert.ok(
-      output.includes(fragment),
-      `the gate failed, but never said "${fragment}":\n${output}`,
-    );
-  }
-}
-
-/** The gate failed, and said these things among others. */
-function assertReports({ code, output }, ...fragments) {
-  assert.equal(code, 1, `the gate passed over a site that is broken:\n${output}`);
-  for (const fragment of fragments) {
-    assert.ok(
-      output.includes(fragment),
-      `the gate failed, but never said "${fragment}":\n${output}`,
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------- #
@@ -162,7 +158,14 @@ function edit(relative, change) {
   };
 }
 
-/** Every file under a directory, recursively. */
+/**
+ * Every file under a directory, recursively.
+ *
+ * Deliberately not the gate's own `walk`, which it does not export and which
+ * these tests must not borrow: a traversal that had stopped descending would hide
+ * pages from the gate *and* leave the mutations here landing on the same pages the
+ * gate no longer looks at, so both sides would agree and nothing would be reported.
+ */
 function filesUnder(dir) {
   return readdirSync(dir).flatMap((entry) => {
     const full = join(dir, entry);

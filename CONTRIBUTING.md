@@ -38,8 +38,11 @@ Two notes on the less obvious ones:
   reference from your docstrings, builds the site, and then walks the built pages:
   a broken `:class:` target, a dead link, a link whose `#fragment` lands nowhere, a
   page missing from navigation — any of those fails the build, which is why a green
-  pull request cannot produce a broken site. It builds from the repository root, not
-  from `website/`, because the generator has to read `src/`.
+  pull request cannot produce a broken site. The same build then runs that check
+  against a deliberately broken copy of the export and requires it to report the
+  breakage by name, because a gate nobody has watched fail is a gate nobody should
+  believe. It builds from the repository root, not from `website/`, because the
+  generator has to read `src/`.
 
 Beyond the gates, CI *executes* all four scripts in `examples/`. They are argument-free
 and type-checked, and a change that breaks one breaks the build.
