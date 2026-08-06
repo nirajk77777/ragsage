@@ -2,10 +2,11 @@
 
 The site is deployed as a single image: three stages build it, one stage runs.
 Three of the claims below are about that last stage — the surface a reader
-actually reaches — and the fourth is about the order of the two that are thrown
-away. All four are otherwise only observable by building the image, which takes
-minutes and a working Docker daemon. These read the two definitions instead, so a
-change that would break the deploy fails in the second it takes to run the suite.
+actually reaches — and the other two are about the stages that are thrown away:
+the order they work in, and whether the gate among them runs at all. All five are
+otherwise only observable by building the image, which takes minutes and a working
+Docker daemon. These read the two definitions instead, so a change that would
+break the deploy fails in the second it takes to run the suite.
 
 They are not a substitute for the build. The build is the check, and CI runs it.
 These catch the class of mistake that *looks* right in a diff: a base image
@@ -22,10 +23,17 @@ configuration that serves the homepage for anything it cannot find. It would pas
 a smoke test and hide every broken link the site's own gate exists to catch — and
 hide it only in production, where nobody is looking.
 
-**Resolution is layered above source.** The one claim here that is not about the
-served surface, and the one with no observable symptom at all: getting it wrong
-costs minutes per deploy and breaks nothing, which is why nothing else would ever
-report it.
+**The gate is reached.** A dead link fails the build only because a stage runs
+the check and the published image is built from that stage. Either half alone is
+worthless in a way no reader would see: a check placed after the copy that ships
+the site still fails the build, but a stage nothing depends on is *skipped
+entirely* by the builder — the gate would simply never run, and every build would
+be green.
+
+**Resolution is layered above source.** The last of the claims about the discarded
+stages, and the one with no observable symptom at all: getting it wrong costs
+minutes per deploy and breaks nothing, which is why nothing else would ever report
+it.
 
 Each assertion is paired with a canary, for the reason the documentation gate is:
 "no stage installs Python" is trivially true of a Dockerfile that failed to parse,
@@ -113,6 +121,21 @@ def _copy_of(instructions: list[str], source: str) -> int:
         if any(arg.rstrip("/") == wanted for arg in args[:-1]):
             return index
     return -1
+
+
+def _stages_copied_from(instructions: list[str]) -> set[str]:
+    """The earlier stages a stage copies out of, read off its ``COPY --from=`` flags.
+
+    This is the only thing that makes an earlier stage part of the build: the
+    builder resolves what the target stage needs and skips everything else.
+    """
+    return {
+        flag.removeprefix("--from=")
+        for line in instructions
+        if line.upper().startswith("COPY ")
+        for flag in line.split()[1:]
+        if flag.startswith("--from=")
+    }
 
 
 def _run_of(instructions: list[str], command: str) -> int:
@@ -297,4 +320,66 @@ def test_a_prose_edit_does_not_re_resolve_the_toolchain() -> None:
     assert not prose, (
         "the stage that resolves the Python toolchain reads the documentation site, so editing "
         f"a page re-resolves Sphinx and its dependency tree: {prose}"
+    )
+
+
+def test_a_dead_link_cannot_reach_the_published_image() -> None:
+    """The gate runs over the export, and the image is built from the gated stage.
+
+    Two independent ways for this to stop being true, and neither shows up
+    anywhere a reader or a reviewer would look.
+
+    The first is ordering: the gate reads ``out/``, so it has to run after the
+    build that writes it. A check that runs first passes over the previous
+    export, or over nothing.
+
+    The second is subtler and is the reason this test exists at all. Docker builds
+    only the stages the target needs. Move the gate into a stage nothing copies
+    from — a fourth stage added for tidiness, say — and it is not that the gate
+    runs late, it is that it never runs. The build stays green over a site with
+    every link dead, and the only symptom is that it got faster.
+
+    The gate's own tests are held to the same standard, and for the same reason
+    the gate holds the site to it: an assertion nobody has watched fail is an
+    assertion nobody should believe. They run here rather than in this suite
+    because they measure the gate against the real export, which only exists
+    inside this stage.
+    """
+    stages = _stages()
+    final = list(stages.values())[-1]
+
+    gated = [
+        name
+        for name, body in stages.items()
+        if _run_of(body, "npm run check") >= 0 and _run_of(body, "npm test") >= 0
+    ]
+
+    # Canary: an ordering-and-reachability claim about a check that is not in the
+    # Dockerfile at all is satisfied by its absence.
+    assert len(gated) == 1, (
+        "expected exactly one stage to run the site gate and its tests, found "
+        f"{gated or 'none'} — a dead link would reach the published image unreported"
+    )
+    (gate_stage,) = gated
+
+    body = stages[gate_stage]
+    export = _run_of(body, "npm run build")
+    assert export >= 0, f"`{gate_stage}` gates a static export it never builds"
+    assert export < _run_of(body, "npm run check"), (
+        f"`{gate_stage}` runs the gate before the build that writes the export it reads, so it "
+        "checks the previous build or nothing at all"
+    )
+    assert export < _run_of(body, "npm test"), (
+        f"`{gate_stage}` runs the gate's own tests before the export they mutate exists"
+    )
+
+    # Canary: a serving stage that copies from nothing is not a multi-stage build,
+    # and the reachability claim below would hold over an empty set.
+    reached = _stages_copied_from(final)
+    assert reached, "the serving stage copies out of no earlier stage, so it serves nothing"
+
+    assert gate_stage in reached, (
+        f"the serving stage is built from {sorted(reached)}, not from `{gate_stage}` — Docker "
+        f"builds only the stages the target needs, so `{gate_stage}` and the gate in it are "
+        "skipped entirely and every build is green"
     )

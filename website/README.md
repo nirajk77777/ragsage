@@ -58,3 +58,16 @@ Each assertion is paired with a canary establishing that the corpus it ran over 
 not empty, so an empty or partial build reports failure rather than a vacuous
 success. See the header of `scripts/check-built-site.mjs` for why that matters more
 than usual here.
+
+Only internal links. External link rot needs the network and must never be able to
+fail a deploy.
+
+```bash
+npm run build && npm test
+```
+
+`npm test` is the gate's own gate: it copies the export, breaks exactly one thing
+in the copy — a dead link, a dead anchor, an orphaned page, a navigation entry
+pointing at nothing, an empty build — and requires `npm run check` to report that
+one thing by name. It runs against the real export rather than a fixture, so it
+needs `npm run build` first; it runs inside the image for the same reason.

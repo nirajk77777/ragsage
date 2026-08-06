@@ -38,6 +38,16 @@ lands on the wrong line reads as a working link — so those tests take the URL 
 generator produced, open the checked-in file at the line it names, and assert the
 object is declared there.
 
+**The warning gate.** Sphinx is still the only thing that resolves the 202
+cross-reference roles in the docstrings, and a role that resolves nowhere is a
+warning rather than an error — the build succeeds and emits the role as plain
+text. So the run is gated on its own warnings, and the gate is an allow-list of
+one known builder defect rather than ``-W``, because that defect warns on every
+real run. An allow-list applied to the wrong file, or applied to the whole text
+instead of line by line, is green forever over a reference full of dead
+references. That is the same vacuity the built-site gate is arranged against, one
+stage earlier, so it is checked the same way.
+
 **What the run writes, and in what order.** The last two sections leave the
 transforms and take the page-writing step whole, against a stand-in for the raw
 Sphinx build. Two of this pipeline's decisions live there and nowhere else: that
@@ -51,11 +61,17 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
+from tools import generate_api_docs
 from tools.generate_api_docs import (
     _DESCRIPTIONS,
+    _EXPECTED_WARNINGS,
     _OUTPUT_DIR,
+    _check_warnings,
+    _run_sphinx,
     _write_pages,
     add_frontmatter,
     count_eaten_markers,
@@ -596,3 +612,138 @@ def test_navigates_the_five_layers_in_the_order_the_engine_is_assembled(tmp_path
         "configuration",
         "adapters",
     ]
+
+
+# ---------------------------------------------------------------------------- #
+# The warning gate over the generated pages
+# ---------------------------------------------------------------------------- #
+
+# A dead `:class:` target, in the shape Sphinx reports one. This is the warning
+# the gate exists for: the build still succeeds, the page still renders, and
+# `:class:`Scope`` comes out as the literal text a reader cannot click.
+_NEW_WARNING = (
+    "/repo/src/ragsage/query.py:docstring of ragsage.query.QueryEngine:1: WARNING: "
+    "py:class reference target not found: Scope"
+)
+
+# The one defect the run corrects downstream, and therefore tolerates here.
+_KNOWN_DEFECT = f"WARNING: {_EXPECTED_WARNINGS[0]}"
+
+
+def test_the_fixtures_say_what_the_gate_is_asked_about() -> None:
+    """The canary for the two tests below, which is the whole allow-list.
+
+    "Tolerates the known defect" is trivially true of a gate that tolerates
+    everything, and "fails on a new warning" is trivially true of one that
+    tolerates nothing. Both claims are only worth making if the two fixtures land
+    on opposite sides of the same list — so that is what is asserted, off the list
+    itself rather than off a copy of it.
+    """
+    assert _EXPECTED_WARNINGS, "the allow-list is empty, so nothing below distinguishes anything"
+    assert any(expected in _KNOWN_DEFECT for expected in _EXPECTED_WARNINGS), (
+        "the tolerated fixture is no longer on the allow-list, so the test that it passes "
+        "proves nothing about the allow-list"
+    )
+    assert not any(expected in _NEW_WARNING for expected in _EXPECTED_WARNINGS), (
+        "the fixture standing for a new warning is on the allow-list, so the test that it "
+        "fails proves nothing"
+    )
+
+
+def test_a_dead_cross_reference_fails_the_generation(tmp_path: Path) -> None:
+    """A role that resolves nowhere stops the build, and says which role.
+
+    Sphinx reports this as a warning and exits zero. Nothing downstream would
+    catch it either: the page builds, the site builds, and the built-site gate
+    walks links — of which this is not one, because the role never became a link.
+    It became the literal text ``:class:`Scope```, which is exactly the failure
+    mode retaining Sphinx was supposed to buy the project out of.
+    """
+    warnings = tmp_path / "warnings.txt"
+    warnings.write_text(f"{_NEW_WARNING}\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as raised:
+        _check_warnings(warnings)
+
+    assert "reference target not found: Scope" in str(raised.value), (
+        f"the generation failed without naming the reference that failed: {raised.value}"
+    )
+
+
+def test_the_known_builder_defect_alone_does_not_fail_the_generation(tmp_path: Path) -> None:
+    """The tolerated warning is tolerated — otherwise the gate is off on day one.
+
+    The eaten keyword-only marker warns once per signature on every real run, and
+    it is corrected two functions later. A gate red on arrival is a gate that gets
+    switched off, and a switched-off gate is worse than the ``-W`` it replaced.
+    """
+    warnings = tmp_path / "warnings.txt"
+    warnings.write_text(f"{_KNOWN_DEFECT}\n" * 35, encoding="utf-8")
+
+    _check_warnings(warnings)
+
+
+def test_a_new_warning_is_caught_among_the_tolerated_ones(tmp_path: Path) -> None:
+    """The allow-list is applied per line, not to the text as a whole.
+
+    This is the way the gate would actually stop working. A real run emits the
+    tolerated defect 35 times, so a check asking "does this build's output contain
+    a known defect?" is satisfied on every run there has ever been — and would go
+    on being satisfied over a reference whose cross-references had all gone dead.
+    The new warning is put in the middle, where a check that stops at the first
+    tolerated line would never reach it.
+    """
+    warnings = tmp_path / "warnings.txt"
+    warnings.write_text(
+        f"{_KNOWN_DEFECT}\n{_NEW_WARNING}\n{_KNOWN_DEFECT}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        _check_warnings(warnings)
+
+    assert _NEW_WARNING in str(raised.value), (
+        "the generation failed without naming the warning that is not a known defect, which "
+        f"is the only line in the file the reader has to act on: {raised.value}"
+    )
+    assert _KNOWN_DEFECT not in str(raised.value), (
+        "the failure lists the defect the run corrects, which buries the one line the "
+        "reader has to act on among 35 they must not"
+    )
+
+
+def test_the_gate_reads_the_file_the_build_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sphinx's ``-w`` destination and the gated file are one decision.
+
+    Everything above is about a file already on disk. This is about the wiring
+    that puts one there — and it is the half with no symptom: point ``-w`` at one
+    path and the gate at another, and the gate reads nothing, finds nothing and
+    passes, on every build, forever. That is a green gate over an ungated build,
+    which is the failure this whole arrangement exists to make impossible.
+
+    Sphinx is stubbed rather than run. The claim is about which path the two
+    halves agree on, and running Sphinx for real would take a minute to answer a
+    question about two strings.
+    """
+    recorded: dict[str, list[str]] = {}
+
+    def stub_sphinx(argv: list[str], check: bool = False) -> subprocess.CompletedProcess[bytes]:
+        recorded["argv"] = argv
+        # Whatever `-w` names is where a real run would put this.
+        Path(argv[argv.index("-w") + 1]).write_text(f"{_NEW_WARNING}\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(generate_api_docs.subprocess, "run", stub_sphinx)
+
+    with pytest.raises(SystemExit) as raised:
+        _run_sphinx(tmp_path)
+
+    # Canary: a stub that was never called wrote nothing, and a gate reading
+    # nothing is exactly the defect this test is about.
+    assert "-w" in recorded.get("argv", []), "sphinx was not asked to record its warnings at all"
+    assert "reference target not found" in str(raised.value), (
+        "sphinx warned and the run continued, so the gate is reading a different file than "
+        f"the build writes: {recorded['argv']}"
+    )
