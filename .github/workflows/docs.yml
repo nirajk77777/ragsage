@@ -56,13 +56,9 @@ jobs:
       # stops the Sphinx stage, and a dead link, a lost keyword-only marker or a
       # missing source link stops the gate in the Node stage.
       #
-      # The image is not pushed anywhere. Building it *is* the check.
-      #
-      # No `--target`, deliberately: the gate runs in the second stage and the
-      # host deploys the third, so a build stopping at either one is a build of
-      # something nobody deploys — and one stopping earlier skips the gate while
-      # still going green. `tests/test_documentation_workflow.py` holds the
-      # command to the definition and context the host is pointed at, since none
-      # of that is observable from a build that passes.
+      # The image is not pushed anywhere. Building it *is* the check, and the
+      # whole definition is built — a `--target` here would gate a stage the host
+      # does not deploy. `tests/test_documentation_workflow.py` holds this command
+      # to that, since none of it is observable from a build that passes.
       - name: Build the documentation image
         run: docker build -f website/Dockerfile -t ragsage-docs .

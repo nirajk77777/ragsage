@@ -35,6 +35,7 @@ parse, and so is "no ignored path is an image input" of an empty input set.
 
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -54,11 +55,13 @@ _LIBRARY_WORKFLOW = _REPO_ROOT / ".github/workflows/ci.yml"
 _DEPLOYED_DOCKERFILE = "website/Dockerfile"
 _DEPLOYED_CONTEXT = "."
 
-# What the documentation build drags in, named as it would appear in a step. The
-# library gate type-checks `tools/` — the generator is custom code and is held to
-# the library's bar — so `tools` is deliberately not among these: reading the
-# generator is not running it.
-_DOCUMENTATION_TOOLCHAIN = ("docker", "npm", "npx", "node ", "website/", "generate_api_docs")
+# What building the documentation drags in, named as it would appear in a step.
+# The library gate type-checks `tools/` — the generator is custom code and is held
+# to the library's bar — so `tools` is deliberately not among these: reading the
+# generator is not running it. `website/` is, and is the broadest of them on
+# purpose: a library gate that reaches into the site at all is a library gate the
+# site can break.
+_DOCUMENTATION_TOOLCHAIN = ("docker", "npm", "npx", "website/", "generate_api_docs")
 
 
 def _workflow(path: Path) -> dict[str, Any]:
@@ -92,6 +95,38 @@ def _run_commands(workflow: dict[str, Any]) -> list[str]:
     ]
 
 
+# ---------------------------------------------------------------------------- #
+# The gate is the deploy
+# ---------------------------------------------------------------------------- #
+
+
+def _build_arguments(command: str) -> list[str]:
+    """The arguments ``docker build`` is invoked with, split as a shell would.
+
+    Anchored on the ``docker build`` tokens rather than sliced off the front of
+    the step, and refusing a step that runs anything else alongside it. Every
+    claim below is positional — the Dockerfile follows ``-f``, the context is the
+    last word — so an environment prefix, a second line, or a chained ``&&`` would
+    not fail them. It would leave them answering about the wrong tokens, which is
+    the one outcome a guard must not have.
+    """
+    statement = command.strip()
+    assert not re.search(r"[\n;&|]", statement), (
+        "the documentation build shares its step with another command, so the context is no "
+        f"longer the last word of it: {statement!r}"
+    )
+
+    tokens = shlex.split(statement)
+    invocations = [
+        index
+        for index, token in enumerate(tokens[:-1])
+        if token == "docker" and tokens[index + 1] == "build"
+    ]
+    assert len(invocations) == 1, f"expected one `docker build` invocation in {statement!r}"
+
+    return tokens[invocations[0] + 2 :]
+
+
 def test_the_workflow_builds_the_image_the_deployment_host_deploys() -> None:
     """One build, of the deployed definition, from the deployed context.
 
@@ -110,7 +145,7 @@ def test_the_workflow_builds_the_image_the_deployment_host_deploys() -> None:
     assert len(builds) == 1, (
         f"expected {_DOCS_WORKFLOW.name} to run exactly one image build, found {builds or 'none'}"
     )
-    arguments = shlex.split(builds[0])[2:]
+    arguments = _build_arguments(builds[0])
 
     assert "--target" not in arguments and not any(
         argument.startswith("--target=") for argument in arguments
@@ -119,15 +154,15 @@ def test_the_workflow_builds_the_image_the_deployment_host_deploys() -> None:
         "builds the whole definition, and the stage holding the gate is not the stage it deploys"
     )
 
-    named = [
+    dockerfiles = [
         arguments[index + 1]
         for index, argument in enumerate(arguments[:-1])
         if argument in ("-f", "--file")
     ]
-    assert named == [_DEPLOYED_DOCKERFILE], (
-        f"the documentation build reads {named or 'no Dockerfile of its own'}, but the deployment "
-        f"host is pointed at {_DEPLOYED_DOCKERFILE} — a green pull request would say nothing "
-        "about the image that deploys"
+    assert dockerfiles == [_DEPLOYED_DOCKERFILE], (
+        f"the documentation build reads {dockerfiles or 'no Dockerfile of its own'}, but the "
+        f"deployment host is pointed at {_DEPLOYED_DOCKERFILE} — a green pull request would say "
+        "nothing about the image that deploys"
     )
     assert (_REPO_ROOT / _DEPLOYED_DOCKERFILE).is_file(), (
         f"{_DEPLOYED_DOCKERFILE} does not exist, so the build is checked against nothing"
@@ -144,6 +179,11 @@ def test_the_workflow_builds_the_image_the_deployment_host_deploys() -> None:
         f"{_DOCS_WORKFLOW.name} does not run on pull requests, so a broken link is reported "
         f"after merge rather than before: {sorted(triggers)}"
     )
+
+
+# ---------------------------------------------------------------------------- #
+# The gate is not the library's problem
+# ---------------------------------------------------------------------------- #
 
 
 def test_the_library_gate_carries_no_documentation_toolchain() -> None:
@@ -184,6 +224,11 @@ def test_the_library_gate_carries_no_documentation_toolchain() -> None:
     )
 
 
+# ---------------------------------------------------------------------------- #
+# The gate is not skipped for its own inputs
+# ---------------------------------------------------------------------------- #
+
+
 def _image_inputs() -> set[str]:
     """Top-level paths the documentation image copies out of the repository.
 
@@ -191,12 +236,18 @@ def _image_inputs() -> set[str]:
     day it lands instead of the day someone remembers this test. Stage-to-stage
     copies are skipped: they carry what an earlier stage built, not repository
     files, and their sources do not exist here.
+
+    Instructions are matched case-insensitively, the way the builder reads them
+    and the way `tests/test_documentation_image.py` reads the same file. A
+    lowercase `copy` is unlikely; reading it as anything other than a copy would
+    drop a real input from this set and fail the canary below, reporting a
+    Dockerfile defect that is really this parser's.
     """
     inputs = set()
     dockerfile = (_REPO_ROOT / _DEPLOYED_DOCKERFILE).read_text(encoding="utf-8")
     for line in dockerfile.splitlines():
         stripped = line.strip()
-        if not stripped.startswith("COPY ") or "--from=" in stripped:
+        if not stripped.upper().startswith("COPY ") or "--from=" in stripped:
             continue
         # `COPY <src>... <dest>` — every argument but the last is a source.
         for source in stripped.split()[1:-1]:
