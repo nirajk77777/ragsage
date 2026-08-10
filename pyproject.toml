@@ -124,11 +124,11 @@ dev = [
     # sdist and look inside it. A build frontend normally fetches this into an
     # isolated environment; a test that asserts over the artifact needs it here.
     "hatchling>=1.27",
-    # The same test reads the CI workflows, to check the docs gate is not
-    # filtered out for a path the documentation image consumes. Already present
-    # transitively, and named anyway: a guard resting on someone else's
-    # dependency tree breaks when that tree changes, for a reason nowhere near
-    # the test.
+    # tests/test_documentation_workflow.py reads the CI workflows, to check the
+    # docs gate builds what the deployment host does and is not filtered out for
+    # a path the documentation image consumes. Already present transitively, and
+    # named anyway: a guard resting on someone else's dependency tree breaks when
+    # that tree changes, for a reason nowhere near the test.
     "pyyaml>=6.0",
 ]
 
