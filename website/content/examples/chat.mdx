@@ -1,0 +1,132 @@
+---
+title: Multi-turn chat
+description: Follow-ups that resolve their own pronouns, and greetings that never touch retrieval.
+---
+
+A chat UI asks two kinds of thing the single-shot examples never do. *"And how much does it
+cost?"* means nothing on its own — its subject lives in an earlier turn. And *"hey"* is not a
+question about the corpus at all, so retrieving against it would be a waste at best and a
+fabricated answer at worst.
+
+The engine handles both, but only the first needs anything from you: pass the conversation as
+`history=`, and give the engine a [`QueryRewriter`](/api/ports#ragsage.ports.QueryRewriter).
+
+## The program
+
+```python title="chat.py"
+import asyncio
+
+from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope, Turn
+from ragsage.fakes import FakeEngineKit, FakeQueryRewriter
+
+CORPUS = {
+    "acme-plan.txt": b"The Acme plan costs $49 per seat per month and includes 10 GB of storage.",
+    "zenith-plan.txt": b"The Zenith plan costs $99 per seat per month and includes unlimited storage.",
+}
+
+
+async def main() -> None:
+    kit = FakeEngineKit()
+    scope = Scope(namespace="local")
+
+    pipeline = IngestionPipeline(
+        parser=kit.parser,
+        classifier=kit.classifier,
+        chunker=kit.chunker,
+        contextualizer=kit.contextualizer,
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        document_store=kit.document_store,
+        llm=kit.llm,
+        cache=kit.cache,
+    )
+    engine = QueryEngine(
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        reranker=kit.reranker,
+        llm=kit.llm,
+        rewriter=FakeQueryRewriter(),  # the only line this example adds
+    )
+
+    for name, content in CORPUS.items():
+        await pipeline.ingest(RawSource(name=name, content=content), scope)
+
+    # The conversation is yours to hold. The engine is stateless: it reads the
+    # turns you pass and stores nothing between calls.
+    history: list[Turn] = []
+    for question in (
+        "hey",
+        "What storage does the Acme plan include?",
+        "And how much does it cost?",
+    ):
+        answer = await engine.query(question, scope, history=history)
+        print(f"Q: {question}")
+        print(f"A: {answer.text.strip()}")
+        print(f"   outcome={answer.outcome} grounded={answer.grounded}")
+        history.append(Turn(question=question, answer=answer.text))
+
+
+asyncio.run(main())
+```
+
+```console
+$ python chat.py
+Q: hey
+A: Hello! Ask me anything about your uploaded documents and I'll answer with citations.
+   outcome=conversational grounded=False
+Q: What storage does the Acme plan include?
+A: The Acme plan costs $49 per seat per month and includes 10 GB of storage. [1][2]
+   outcome=answered grounded=True
+Q: And how much does it cost?
+A: The Acme plan costs $49 per seat per month and includes 10 GB of storage. [1][2]
+   outcome=answered grounded=True
+```
+
+## What each turn did
+
+**`"hey"` never reached retrieval.** [`is_small_talk()`](/api/ports#ragsage.smalltalk.is_small_talk)
+recognises greetings, thanks and "what can you do?", and the engine answers those
+conversationally — no embedding call, no store hit, no rewrite. The reply comes back as
+[`Outcome.CONVERSATIONAL`](/api/models#ragsage.models.Outcome.CONVERSATIONAL) with no
+citations, which is the flag your UI wants: it is not a grounded answer and must not be
+rendered as one.
+
+That check deliberately runs on the *raw* message, before the rewriter. Condensing "thanks"
+against a document thread would manufacture a question the user never asked.
+
+**The third turn resolved "it" against the second.** The rewriter folded the earlier turn's
+terms into the follow-up before retrieval ran, so the query that reached the stores named the
+Acme plan rather than a bare pronoun.
+
+Delete `rewriter=FakeQueryRewriter()` and run the same three turns, and the last one becomes:
+
+```console
+Q: And how much does it cost?
+A: I couldn't find an answer to that in your documents.
+   outcome=not_found grounded=False
+```
+
+Which is the engine behaving correctly on a question that, as asked, genuinely isn't in the
+corpus — nothing in either document is *about* "it". The rewriter is what makes the follow-up
+a real question first.
+
+## In production
+
+`FakeQueryRewriter` folds in the content words of prior turns; that's enough for the
+overlap-based fakes and nothing more. The shipped real one is
+[`OpenAIQueryRewriter`](/api/adapters#ragsage.providers.OpenAIQueryRewriter), which asks a
+cheap model to write a standalone question. It's a separate port from
+[`LLMClient`](/api/ports#ragsage.ports.LLMClient) for that reason: condensation runs on a
+small fast model, and a caller with no history skips it entirely.
+
+Through the assembled façade the same two arguments apply —
+[`RagSage.query()`](/api/facades#ragsage.sage.RagSage.query) and
+[`stream()`](/api/facades#ragsage.sage.RagSage.stream) both take `history=`, and
+`from_config` wires the rewriter for you.
+
+## Next
+
+- [Streaming to a browser](/examples/streaming) — the same conversation, token by token.
+- [Tenants and filters](/examples/scoping) — keeping one user's history off another's corpus.

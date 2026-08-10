@@ -1,0 +1,12 @@
+{
+  "title": "Examples",
+  "description": "Complete programs for the things you actually build with ragsage.",
+  "pages": [
+    "index",
+    "chat",
+    "streaming",
+    "scoping",
+    "custom-adapters",
+    "evaluation"
+  ]
+}
