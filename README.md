@@ -8,12 +8,12 @@ A production-ready Retrieval-Augmented Generation engine for Python — parsing,
 hybrid retrieval, reranking, grounded generation and verifiable citations — behind
 swappable ports.
 
-[![PyPI](https://img.shields.io/pypi/v/ragsage.svg)](https://pypi.org/project/ragsage/)
-[![Python](https://img.shields.io/pypi/pyversions/ragsage.svg)](https://pypi.org/project/ragsage/)
+[![PyPI](https://img.shields.io/pypi/v/ragsage.svg?color=47795C)](https://pypi.org/project/ragsage/)
+[![Python](https://img.shields.io/pypi/pyversions/ragsage.svg?color=47795C)](https://pypi.org/project/ragsage/)
 [![CI](https://github.com/nirajk77777/ragsage/actions/workflows/ci.yml/badge.svg)](https://github.com/nirajk77777/ragsage/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://ragsage-docs.nirajk.dev/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/nirajk77777/ragsage/blob/main/LICENSE)
-[![Typed](https://img.shields.io/badge/typing-strict-informational.svg)](https://github.com/nirajk77777/ragsage/blob/main/src/ragsage/py.typed)
+[![Docs](https://img.shields.io/badge/docs-latest-47795C.svg)](https://ragsage-docs.nirajk.dev/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-47795C.svg)](https://github.com/nirajk77777/ragsage/blob/main/LICENSE)
+[![Typed](https://img.shields.io/badge/typing-strict-47795C.svg)](https://github.com/nirajk77777/ragsage/blob/main/src/ragsage/py.typed)
 
 </div>
 
