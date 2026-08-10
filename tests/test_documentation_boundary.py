@@ -1,6 +1,6 @@
 """The documentation site stays out of the Python package, and stays one site.
 
-Four invariants, all structural, all easy to break by accident and impossible to
+Five invariants, all structural, all easy to break by accident and impossible to
 notice once broken.
 
 **The site is not part of the distribution.** ``website/`` is a Next.js
@@ -23,11 +23,21 @@ that surface it, and what a first-time reader assumes they are looking at. A
 ``.gitattributes`` entry marking the site as documentation keeps the count
 honest, and the entry is one deleted line away from not existing.
 
-**There is only one documentation site.** The Sphinx site on Read the Docs was
-retired, and no redirects are possible from our side. A surviving link to the old
-host therefore does not merely point somewhere stale — it points at a project that
-no longer exists, from a repository that is the canonical source of truth about
-where the documentation lives. That is worse than no link.
+**There is only one documentation site.** The Sphinx site on Read the Docs is
+being retired, and no redirects are possible from our side. A surviving link to
+the old host therefore does not merely point somewhere stale — it points, from the
+canonical source of truth about where the documentation lives, at a project on its
+way to deletion. That is worse than no link. Deleting the project is the
+maintainer's step and is not visible from here; what is asserted is the half that
+is, which is that nothing in this repository sends a reader there.
+
+**And the links into it name pages it has.** The repointed links are deep — they
+name ``/failure-modes`` and ``/releasing``, not the homepage, because a reader
+sent to a homepage to hunt for the page they were promised has been sent nowhere
+useful. Nothing else in the project is watching them: the site's own gate walks
+the links *inside* the built site, and these are links from outside it. So a page
+renamed in ``website/content/`` breaks the README silently, which is the failure
+this whole retirement was about, arriving by a different road.
 
 **The release notes have one home, and it is not here.** Their canonical home is
 the GitHub releases page, which is generated from the tag that publishes the
@@ -48,6 +58,7 @@ import re
 import subprocess
 import sys
 import tarfile
+from collections.abc import Iterator
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -79,6 +90,16 @@ _REQUIRED_SDIST_PREFIXES = ("src/ragsage/", "tests/", "examples/")
 # while a URL anyone could click should.
 _RETIRED_HOST = "readthedocs" + ".io"
 _RETIRED_CONFIG = ".readthedocs" + ".yaml"
+
+# Where the retired links lived: the three files a reader arrives through. Named
+# rather than counted, because a count is satisfied by any fifty files in the
+# tree, and these are the ones whose links cost something when they rot.
+_PUBLISHED_ENTRY_POINTS = ("README.md", "CONTRIBUTING.md", "SECURITY.md")
+
+# The hand-authored pages, which are also the routes the site serves: the path
+# is the URL. Read by two of the claims below, so it sits with the constants
+# rather than under either one's heading.
+_SITE_CONTENT = _REPO_ROOT / "website/content"
 
 
 def _build_sdist(destination: Path) -> Path:
@@ -159,8 +180,26 @@ def _tracked_files() -> list[str]:
     return [name for name in result.stdout.split("\0") if name]
 
 
+def _readable_tracked_files() -> Iterator[tuple[str, str]]:
+    """Every tracked file whose contents could carry a link, with those contents.
+
+    A file that will not decode is skipped rather than reported: it cannot hold a
+    link a reader follows, and the alternative is a guard that fails on the day
+    someone commits a PNG.
+    """
+    for name in _tracked_files():
+        try:
+            yield name, (_REPO_ROOT / name).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, ValueError, FileNotFoundError):
+            continue
+
+
 def test_no_reference_to_read_the_docs_survives() -> None:
-    """The old site is deleted, so a link to it is a link to a 404.
+    """This repository points at one documentation site, and it is the new one.
+
+    The old project's deletion is the maintainer's to perform and is not
+    observable from here, so this asserts the half that is: whatever survives on
+    the retired host, nothing here sends a reader to it.
 
     The lockfile is exempt, and only the lockfile: it records the resolved source
     URL of every wheel, and some of those are hosted on the retired host's domain
@@ -168,27 +207,143 @@ def test_no_reference_to_read_the_docs_survives() -> None:
     not documentation links, and they are not ours to rewrite.
     """
     offenders = []
-    searched = 0
+    scanned = set()
 
     for name in _tracked_files():
         assert _RETIRED_CONFIG not in name, f"the retired build configuration is still here: {name}"
-        if name == "uv.lock":
-            continue
-        try:
-            text = (_REPO_ROOT / name).read_text(encoding="utf-8")
-        except (UnicodeDecodeError, ValueError, FileNotFoundError):
-            continue  # a binary file cannot carry a link a reader will follow
 
-        searched += 1
+    for name, text in _readable_tracked_files():
+        if name == "uv.lock" or not text.strip():
+            continue
+
+        scanned.add(name)
         if _RETIRED_HOST in text.lower():
             offenders.append(name)
 
-    # Canary: a search that walked nothing finds nothing.
-    assert searched > 50, f"only {searched} files were searched; the guard is not looking"
+    # Canaries. A search that walked nothing finds nothing — and neither does one
+    # that walked the right files while they held nothing: "no retired link in
+    # README.md" is trivially true of a README.md that is zero bytes long, which
+    # is why an empty file is not counted as scanned. The named three are checked
+    # by name because the count above is satisfied by any fifty files, including
+    # fifty that are not these.
+    assert len(scanned) > 50, f"only {len(scanned)} files were searched; the guard is not looking"
+
+    unread = [name for name in _PUBLISHED_ENTRY_POINTS if name not in scanned]
+    assert not unread, (
+        "the files the retired links lived in were not scanned, or hold nothing to scan, so a "
+        f"link surviving in one of them would not be found: {unread}"
+    )
 
     assert not offenders, (
-        "these files still point at the retired documentation site, which no longer exists "
-        f"and cannot redirect: {offenders}"
+        "these files still point at the retired documentation site, which is being deleted and "
+        f"cannot redirect: {offenders}"
+    )
+
+
+# ---------------------------------------------------------------------------- #
+# The links into the site name pages it has
+# ---------------------------------------------------------------------------- #
+
+_DOCS_SITE = "https://ragsage-docs.nirajk.dev"
+
+# A link into the site, capturing everything after the host. It ends at
+# whitespace or at the punctuation that closes it in Markdown prose and in a
+# badge's parentheses; a trailing sentence mark is trimmed after the fact rather
+# than excluded here, since a `.` is legal inside a path and only suspicious at
+# the end of one.
+_DOCS_LINK = re.compile(re.escape(_DOCS_SITE) + r"([^\s)\"'`,<>\]]*)")
+_SENTENCE_MARKS = ".,;:!?"
+
+# The generated reference. None of it is committed — it is written into
+# `website/content/api/` by a build — so this guard, which reads the repository,
+# can answer for prose and cannot answer for those. Resolving them only when a
+# local build happens to have left them on disk would be worse than not trying:
+# the guard would be strict on the machine that just built the site and lax
+# everywhere else, including CI.
+#
+# Matched as a route rather than as a string prefix, the way the site's own gate
+# matches it: `/api-tour` is a prose page that merely starts with the same
+# letters, and exempting it would be this guard quietly declining to check a page
+# it can see.
+_GENERATED_ROOT = "/api"
+
+
+def _is_generated(route: str) -> bool:
+    return route == _GENERATED_ROOT or route.startswith(f"{_GENERATED_ROOT}/")
+
+
+def _published_links() -> dict[str, list[str]]:
+    """Every link into the documentation site, by the route it names.
+
+    The fragment is dropped — anchors are the site gate's business, and it checks
+    them against the built pages. The trailing slash is emphatically *not*, and
+    this is the whole reason the route is read literally: `trailingSlash` is off
+    in the Next.js configuration, so the export writes `releasing.html`, and
+    nginx answers `/releasing/` by trying `/releasing/.html` and giving up. A
+    reader following a link with a slash on the end lands on a not-found, so this
+    must report it rather than tidy it away.
+
+    This file is scanned along with the rest, and `_DOCS_SITE` above is found in
+    it. That yields `/`, which is a real page — so the guard's own source neither
+    invents a failure nor hides one.
+    """
+    links: dict[str, list[str]] = {}
+    for name, text in _readable_tracked_files():
+        for match in _DOCS_LINK.finditer(text):
+            path = match.group(1).split("#")[0].rstrip(_SENTENCE_MARKS)
+            links.setdefault(path or "/", []).append(name)
+    return links
+
+
+def _prose_routes() -> set[str]:
+    """The routes the committed prose provides, under the path-is-the-URL rule."""
+    routes = set()
+    for path in _SITE_CONTENT.rglob("*"):
+        if path.suffix not in (".md", ".mdx"):
+            continue
+        relative = path.relative_to(_SITE_CONTENT)
+        if relative.parts[0] == _GENERATED_ROOT.lstrip("/"):
+            continue
+
+        stem = relative.with_suffix("").as_posix().removesuffix("/index")
+        routes.add("/" if stem == "index" else f"/{stem}")
+    return routes
+
+
+def test_every_published_link_names_a_page_the_site_has() -> None:
+    """A link out of the repository is only as good as the page it lands on.
+
+    Checked against the content tree rather than the live site, because a test
+    that needs the network fails when someone else's machine is down, and a gate
+    that fails for reasons unrelated to the change is a gate that gets disabled.
+    The content tree is what determines the routes anyway: the path is the URL.
+
+    What this cannot see is the reference, which is generated rather than
+    committed. That boundary is stated rather than papered over — see
+    `_GENERATED_ROOT`.
+    """
+    links = _published_links()
+    routes = _prose_routes()
+
+    # Canaries. Every claim below is over the routes the prose provides and the
+    # links that name them, so neither set may be empty — and the claim that
+    # matters is about the *deep* links, which a corpus of homepage links would
+    # satisfy while establishing nothing.
+    assert routes, f"no prose pages were found under {_SITE_CONTENT}, so nothing was resolved"
+    assert links, f"no links to {_DOCS_SITE} were found, so nothing was checked"
+
+    checkable = {route: sources for route, sources in links.items() if not _is_generated(route)}
+    assert any(route != "/" for route in checkable), (
+        "every published link points at the homepage, so nothing here establishes that a deep "
+        "link lands on the page it names rather than on the front page"
+    )
+
+    dangling = {
+        route: sorted(set(sources)) for route, sources in checkable.items() if route not in routes
+    }
+    assert not dangling, (
+        "these files link to pages the site does not have, so a reader following them lands on "
+        f"a not-found: {dangling}. The routes it does have are {sorted(routes)}"
     )
 
 
@@ -267,7 +422,6 @@ def test_the_repository_still_reads_as_a_python_project() -> None:
 # ---------------------------------------------------------------------------- #
 
 _RELEASE_NOTES = _REPO_ROOT / "docs/release-notes"
-_SITE_CONTENT = _REPO_ROOT / "website/content"
 _RELEASES_PAGE = "github.com/nirajk77777/ragsage/releases"
 
 
