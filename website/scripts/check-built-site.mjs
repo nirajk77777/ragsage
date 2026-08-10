@@ -178,6 +178,12 @@ for (const route of pages.keys()) {
 
 let checkedLinks = 0;
 let checkedFragments = 0;
+// Counted separately from `checkedFragments`, which every prose page inflates
+// with its own table of contents: enough hand-written pages, each with enough
+// headings, and the whole-site count clears any threshold on its own — so a
+// build that dropped the entire API reference would sail past a canary phrased
+// over it. This one is scoped to the corpus whose absence it exists to notice.
+let checkedApiFragments = 0;
 
 for (const [route, page] of pages) {
   for (const href of page.links) {
@@ -194,6 +200,7 @@ for (const [route, page] of pages) {
 
     if (fragment) {
       checkedFragments += 1;
+      if (isApiRoute(target)) checkedApiFragments += 1;
       check(
         hasAnchor(targetPage, fragment),
         `${route}: link to ${href} resolves to ${target}, which has no #${fragment}`,
@@ -204,10 +211,14 @@ for (const [route, page] of pages) {
 
 canary(checkedLinks > 0, 'no internal links were found to check');
 canary(
-  checkedFragments > 100,
-  `only ${checkedFragments} anchored links were checked; the API reference alone has hundreds`,
+  checkedApiFragments > 100,
+  `only ${checkedApiFragments} anchored links were checked into the API reference, which ` +
+    `alone has hundreds`,
 );
-notes.push(`${checkedLinks} internal links (${checkedFragments} anchored) resolve`);
+notes.push(
+  `${checkedLinks} internal links (${checkedFragments} anchored, ` +
+    `${checkedApiFragments} into the reference) resolve`,
+);
 
 // ---------------------------------------------------------------------------- #
 // 3. No signature carries the eaten keyword-only marker

@@ -1,0 +1,137 @@
+---
+title: Tenants and filters
+description: One engine, many corpora — namespaces, per-document narrowing, dedup and deletion.
+---
+
+[`Scope`](/api/models#ragsage.scope.Scope) is the engine's only isolation concept, and it is
+deliberately dumb: a namespace string plus an optional mapping of filters. The library never
+learns what a tenant, a user or a workspace is — your application maps whatever it has onto a
+namespace, and the stores key on it.
+
+This example runs two tenants through one engine, narrows a query to a chosen document, and
+shows what re-ingesting the same bytes does.
+
+## The program
+
+```python title="scoping.py"
+import asyncio
+
+from ragsage import IngestionPipeline, QueryEngine, RawSource, Scope
+from ragsage.fakes import FakeEngineKit
+
+CORPUS = {
+    "acme": {"policy.txt": b"Acme staff get 20 days of paid leave per year."},
+    "globex": {"policy.txt": b"Globex staff get 25 days of paid leave per year."},
+}
+
+QUESTION = "How much paid leave do staff get?"
+
+
+async def main() -> None:
+    kit = FakeEngineKit()
+    pipeline = IngestionPipeline(
+        parser=kit.parser,
+        classifier=kit.classifier,
+        chunker=kit.chunker,
+        contextualizer=kit.contextualizer,
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        document_store=kit.document_store,
+        llm=kit.llm,
+        cache=kit.cache,
+    )
+    engine = QueryEngine(
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        reranker=kit.reranker,
+        llm=kit.llm,
+    )
+
+    # Same pipeline, same stores, one namespace per tenant.
+    for tenant, documents in CORPUS.items():
+        for name, content in documents.items():
+            await pipeline.ingest(RawSource(name=name, content=content), Scope(namespace=tenant))
+
+    for tenant in CORPUS:
+        answer = await engine.query(QUESTION, Scope(namespace=tenant))
+        print(f"{tenant} -> {answer.text.strip()}")
+
+    # Narrowing *within* a namespace: ask only of one document.
+    acme = Scope(namespace="acme")
+    expenses = await pipeline.ingest(
+        RawSource(name="expenses.txt", content=b"Expenses over $100 need manager approval."),
+        acme,
+    )
+    narrowed = acme.with_filters(document_ids=[expenses.document.id])
+    print(f"\nnarrowed      -> {(await engine.query(QUESTION, narrowed)).text.strip()}")
+    print(f"whole tenant  -> {(await engine.query(QUESTION, acme)).text.strip()}")
+
+    # Re-ingesting identical bytes is a no-op, not a duplicate.
+    again = await pipeline.ingest(
+        RawSource(name="policy.txt", content=CORPUS["acme"]["policy.txt"]), acme
+    )
+    print(f"\nre-ingest: id={again.document.id} chunks={again.chunk_count} dedup={again.deduplicated}")
+    print("acme documents:", [(d.id, d.source) for d in await kit.document_store.list(acme)])
+
+
+asyncio.run(main())
+```
+
+```console
+$ python scoping.py
+acme -> Acme staff get 20 days of paid leave per year. [1]
+globex -> Globex staff get 25 days of paid leave per year. [1]
+
+narrowed      -> I couldn't find an answer to that in your documents.
+whole tenant  -> Acme staff get 20 days of paid leave per year. [1]
+
+re-ingest: id=a5815fb3d9fddd77 chunks=0 dedup=True
+acme documents: [('a5815fb3d9fddd77', 'policy.txt'), ('775994671c98fb3b', 'expenses.txt')]
+```
+
+## What that shows
+
+**Two tenants, two answers, one engine.** Neither query mentions the other tenant's document
+and neither could reach it. The namespace is a hard partition every store keys on, so
+isolation is not something the caller remembers to apply per query — it travels with the
+`Scope` that every method already takes.
+
+**Filters narrow, and can only narrow.** [`with_filters()`](/api/models#ragsage.scope.Scope.with_filters)
+returns a copy carrying extra metadata — here, the one document the user picked in a UI. The
+narrowed query honestly reports not-found because the leave policy is outside the chosen
+document, while the same question against the whole namespace answers it. A filter can never
+widen access beyond `namespace`; it is applied as part of the store query rather than
+post-hoc, so it can't be the thing you forgot to check.
+
+**Identical bytes ingest once.** The content hash already existed, so nothing was reparsed,
+re-embedded or re-stored: `chunk_count=0`, `deduplicated=True`, and the document list still
+holds two entries rather than three. Re-uploading a file the user already has costs one hash
+lookup — worth knowing before you build an "is this already uploaded?" check of your own.
+
+## Deleting
+
+The fakes' stores each have their own `delete`. Against a real database, drive them together
+through the façade instead:
+
+```python
+await sage.delete_document(scope, document_id)  # one document, from all three stores
+await sage.purge(scope)                         # everything in the namespace
+```
+
+[`purge()`](/api/facades#ragsage.sage.RagSage.purge) is load-bearing rather than a convenience:
+there is no foreign key cascading chunk deletion from your own user table, so this is the only
+thing that removes a namespace's corpus. Both are idempotent.
+
+## In production
+
+The `Scope` is where your tenancy model meets the engine, and the engine is the wrong place to
+express it — that is the whole point of the boundary. A web backend maps its authenticated
+tenant id to `Scope(namespace=tenant_id)` at the edge; a CLI passes `"local"`. A pricing, auth
+or tenancy change should never require editing anything under `ragsage`.
+
+## Next
+
+- [Multi-turn chat](/examples/chat) — the conversation state your application holds alongside the scope.
+- [Evaluating answers](/examples/evaluation) — scoring a scope's corpus against labelled questions.

@@ -1,0 +1,107 @@
+---
+title: Examples
+description: Complete programs for the things you actually build with ragsage.
+---
+
+Each page here is one whole program, not a fragment: paste it into a file, run it, and it
+prints the output shown beside it. Every one runs against the in-memory fakes, so none of
+them needs a database, a network, or an API key — the wiring is the only thing that differs
+from a production deployment, and each page says which line that is.
+
+<Callout title="Start with the quickstart">
+  These assume you've already run the loop once. [**Quickstart**](/quickstart) does that in
+  about sixty seconds.
+</Callout>
+
+## The examples
+
+<Cards>
+  <Card
+    title="Multi-turn chat"
+    href="/examples/chat"
+    description="Follow-up questions that resolve their own pronouns, and greetings that never touch retrieval."
+  />
+  <Card
+    title="Streaming to a browser"
+    href="/examples/streaming"
+    description="Turn the event stream into Server-Sent Events, one frame at a time."
+  />
+  <Card
+    title="Tenants and filters"
+    href="/examples/scoping"
+    description="One engine, many corpora: namespaces, per-document narrowing, dedup and deletion."
+  />
+  <Card
+    title="Bringing your own adapter"
+    href="/examples/custom-adapters"
+    description="An embedder, a parser and a reranker that import nothing from ragsage."
+  />
+  <Card
+    title="Evaluating answers"
+    href="/examples/evaluation"
+    description="Score the engine on a labelled set and gate CI on the numbers."
+  />
+</Cards>
+
+## The scripts in the repository
+
+Four of these ship as files rather than prose. They are argument-free, type-checked *and
+executed* in CI, so a change to a port signature breaks the build instead of quietly rotting
+the docs:
+
+| Script | What it shows |
+|---|---|
+| [`fakes_end_to_end.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/fakes_end_to_end.py) | The whole loop against the fakes, including the honest not-found path. |
+| [`custom_embedder.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_embedder.py) | Implementing [`Embedder`](/api/ports#ragsage.ports.Embedder) against something that isn't Voyage. |
+| [`custom_parser.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_parser.py) | Implementing [`DocumentParser`](/api/ports#ragsage.ports.DocumentParser) for a format the built-in backend doesn't understand. |
+| [`assembled_engine.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/assembled_engine.py) | `RagSage.from_config(...)` end to end. Wants a Postgres; skips with a message without one. |
+
+```console
+$ python examples/fakes_end_to_end.py
+```
+
+## The wiring these pages share
+
+Every example below builds the same two objects, so only the differences are commented on
+each page. [`IngestionPipeline`](/api/facades#ragsage.ingestion.IngestionPipeline) writes,
+[`QueryEngine`](/api/facades#ragsage.query.QueryEngine) reads, and one `FakeEngineKit` holds
+a single instance of each fake so both ends share the same in-memory stores:
+
+```python
+from ragsage import IngestionPipeline, QueryEngine
+from ragsage.fakes import FakeEngineKit
+
+kit = FakeEngineKit()
+
+pipeline = IngestionPipeline(
+    parser=kit.parser,
+    classifier=kit.classifier,
+    chunker=kit.chunker,
+    contextualizer=kit.contextualizer,
+    embedder=kit.embedder,
+    vector_store=kit.vector_store,
+    lexical_store=kit.lexical_store,
+    document_store=kit.document_store,
+    llm=kit.llm,
+    cache=kit.cache,
+)
+engine = QueryEngine(
+    embedder=kit.embedder,
+    vector_store=kit.vector_store,
+    lexical_store=kit.lexical_store,
+    reranker=kit.reranker,
+    llm=kit.llm,
+)
+```
+
+Swapping in real models and Postgres means passing different objects to those two
+constructors — or letting [`RagSage.from_config()`](/api/facades#ragsage.sage.RagSage.from_config)
+assemble them, as the [quickstart](/quickstart) shows. No example on these pages changes shape
+when you do.
+
+<Callout type="warn" title="What the fakes do and don't prove">
+  The fake LLM is an *extractive reader*: it answers with the best-matching source verbatim
+  and cites it. That makes the plumbing — routing, grounding, citations, not-found — exact and
+  deterministic, which is what these examples are about. It says nothing about how a real
+  model will phrase an answer, and it flatters the [evaluation](/examples/evaluation) numbers.
+</Callout>

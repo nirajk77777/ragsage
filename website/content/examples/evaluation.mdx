@@ -1,0 +1,213 @@
+---
+title: Evaluating answers
+description: Score the engine on a labelled set, and gate CI on the numbers.
+---
+
+Retrieval changes — a new chunk size, a different embedder, a reranker like the one on the
+[previous page](/examples/custom-adapters) — are easy to make and hard to judge. A handful of
+spot-checked questions will tell you the change *can* work; a labelled set tells you what it
+did to everything else.
+
+[`Evaluator`](/api/facades#ragsage.evaluation.Evaluator) runs a dataset through a real
+`QueryEngine` and scores five things per question, then aggregates them.
+
+## The program
+
+```python title="evaluate.py"
+import asyncio
+
+from ragsage import (
+    NOT_FOUND_MESSAGE,
+    EvalExample,
+    EvalThresholds,
+    Evaluator,
+    IngestionPipeline,
+    QueryEngine,
+    RawSource,
+    Scope,
+)
+from ragsage.fakes import FakeEngineKit
+
+CORPUS = {
+    "leave.txt": b"Employees accrue 20 days of paid leave per year, and may carry over 5 days.",
+    "expenses.txt": b"Expenses over $100 require manager approval before reimbursement.",
+}
+
+
+async def main() -> None:
+    kit = FakeEngineKit()
+    scope = Scope(namespace="hr")
+    pipeline = IngestionPipeline(
+        parser=kit.parser,
+        classifier=kit.classifier,
+        chunker=kit.chunker,
+        contextualizer=kit.contextualizer,
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        document_store=kit.document_store,
+        llm=kit.llm,
+        cache=kit.cache,
+    )
+    engine = QueryEngine(
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        reranker=kit.reranker,
+        llm=kit.llm,
+    )
+
+    # Labels are keyed to document ids, so keep what ingestion assigned.
+    ids = {}
+    for name, content in CORPUS.items():
+        result = await pipeline.ingest(RawSource(name=name, content=content), scope)
+        ids[name] = result.document.id
+
+    dataset = [
+        EvalExample(
+            question="How many days of paid leave do employees accrue?",
+            expected_answer="20 days",  # substring the answer should contain
+            ground_truth_answer="Employees accrue 20 days of paid leave per year.",
+            relevant_document_ids=frozenset({ids["leave.txt"]}),
+        ),
+        EvalExample(
+            question="When does an expense need manager approval?",
+            expected_answer="$100",
+            ground_truth_answer="Expenses over $100 require manager approval.",
+            relevant_document_ids=frozenset({ids["expenses.txt"]}),
+        ),
+        # The labelled negative. Its ground truth is the not-found message, so an
+        # honest refusal scores as the right response instead of a miss.
+        EvalExample(
+            question="What is the company's stock ticker?",
+            ground_truth_answer=NOT_FOUND_MESSAGE,
+        ),
+    ]
+
+    report = await Evaluator(engine, scope).evaluate(dataset)
+    print(f"accuracy           {report.answer_accuracy:.2f}")
+    print(f"faithfulness       {report.mean_faithfulness:.2f}")
+    print(f"answer relevancy   {report.mean_answer_relevancy:.2f}")
+    print(f"context precision  {report.mean_context_precision:.2f}")
+    print(f"context recall     {report.mean_context_recall:.2f}")
+    print(f"grounded rate      {report.grounded_rate:.2f}")
+
+    check = report.check(EvalThresholds())
+    print(f"\npassed={check.passed} failures={check.failures}")
+
+    for case in report.results:
+        print(f"  matched={case.answer_matched}  {case.example.question}")
+
+
+asyncio.run(main())
+```
+
+```console
+$ python evaluate.py
+accuracy           1.00
+faithfulness       1.00
+answer relevancy   1.00
+context precision  1.00
+context recall     1.00
+grounded rate      0.67
+
+passed=True failures=()
+  matched=True  How many days of paid leave do employees accrue?
+  matched=True  When does an expense need manager approval?
+  matched=True  What is the company's stock ticker?
+```
+
+<Callout type="warn" title="Perfect scores mean the harness works, not the engine">
+  These run against the fake LLM, which answers by quoting the best-matching source verbatim —
+  so of course it is faithful to its context. Point the same dataset at a real model and the
+  numbers become informative. What the run above proves is that the labels, the ids and the
+  thresholds line up.
+</Callout>
+
+## The five metrics
+
+| Metric | Question it answers | What a low score usually means |
+|---|---|---|
+| `answer_accuracy` | Did the answer contain `expected_answer`? | The engine answered something else — or refused. |
+| `faithfulness` | Is the answer supported by the context it cited? | Generation is drifting past its sources. |
+| `answer_relevancy` | Does the answer resemble `ground_truth_answer`? | Right documents, wrong emphasis. |
+| `context_precision` | Were the cited documents the relevant ones? | Retrieval is pulling in noise. |
+| `context_recall` | Were the relevant documents all cited? | Retrieval is missing a document the answer needed. |
+
+`grounded_rate` sits alongside them, and 0.67 above is correct rather than a shortfall: two of
+the three questions *should* be grounded, and the third should not. Reading it as a number to
+maximise is how you end up rewarding a model that answers everything.
+
+Every label on [`EvalExample`](/api/facades#ragsage.evaluation.EvalExample) is optional. Omit
+`relevant_document_ids` and the question isn't scored on context (both metrics count 1.0),
+which is useful when you have a list of real user questions and no patience for labelling
+which document each one lives in — but do read the aggregate knowing those examples raised it
+for free. An example with no `expected_answer` counts as matched for the same reason: nothing
+was asserted, so nothing failed.
+
+## The labelled negative
+
+The third example carries no `expected_answer` and no relevant documents, and its ground truth
+is [`NOT_FOUND_MESSAGE`](/api/facades#ragsage.query.NOT_FOUND_MESSAGE) — the exact string the
+engine returns when retrieval can't support an answer.
+
+A dataset of only answerable questions can be aced by a system that never refuses, which is
+the failure mode this library exists to avoid. Give a corpus-shaped question with no corpus
+answer, and label the refusal as correct.
+
+## Gating CI
+
+[`check()`](/api/facades#ragsage.evaluation.EvalReport.check) compares the aggregate means
+against [`EvalThresholds`](/api/facades#ragsage.evaluation.EvalThresholds) and names what
+fell short, which is the shape a CI step wants:
+
+```python
+check = report.check(EvalThresholds(faithfulness=0.85, context_recall=0.80))
+if not check.passed:
+    raise SystemExit(f"eval regressed: {', '.join(check.failures)}")
+```
+
+Defaults are conservative pass marks (0.70 faithfulness, 0.60 answer relevancy, 0.70 context
+precision and recall). Tighten them as the numbers earn it — a threshold nothing has ever
+failed is a threshold measuring nothing.
+
+## The built-in golden set
+
+For a smoke test with no corpus of your own,
+[`run_golden_eval()`](/api/facades#ragsage.goldens.run_golden_eval) ingests a small
+multi-topic corpus into fresh fakes, resolves its labels to the ids ingestion assigned, and
+returns the same report. Fully offline and deterministic — the same run every time:
+
+```python
+import asyncio
+
+from ragsage import EvalThresholds, run_golden_eval
+
+
+async def main() -> None:
+    report = await run_golden_eval()
+    print(report.answer_accuracy, report.check(EvalThresholds()).passed)
+
+
+asyncio.run(main())
+```
+
+```console
+1.0 True
+```
+
+The bundled CLI wraps exactly that:
+
+```bash
+ragsage eval
+```
+
+Its four documents and five questions — including one labelled negative — are what the
+library gates its own contextualisation changes on; the
+[heading-window measurement](/measurements/07-heading-window-contextualizer) is one such
+comparison, run by handing `run_golden_eval()` a different contextualizer.
+
+## Next
+
+- [Bringing your own adapter](/examples/custom-adapters) — the changes worth measuring this way.
+- [Failure modes](/failure-modes) — when the scores say retrieval is fine and the answers still aren't.

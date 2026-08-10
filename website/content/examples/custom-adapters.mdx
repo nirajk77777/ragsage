@@ -1,0 +1,252 @@
+---
+title: Bringing your own adapter
+description: An embedder, a parser and a reranker that import nothing from ragsage.
+---
+
+The thirteen ports are [`Protocol`](https://docs.python.org/3/library/typing.html#typing.Protocol)s,
+so an adapter conforms by *shape*: it subclasses nothing, registers nowhere, and — apart from
+the domain models it passes across the seam — imports nothing from `ragsage`. The dependency
+arrow points inward. Your adapter may know about ragsage; ragsage never has to know about
+your adapter.
+
+Three of them, each replacing a different stage, each a complete program.
+
+## An embedder
+
+Swapping the embedder is the usual reason to reach for a port: a local model, a different
+vendor, or — as here — no model at all. `TrigramEmbedder` hashes character trigrams into a
+fixed-width vector, which needs no weights, no network and no API key, so the example stays
+about the seam rather than the vendor.
+
+```python title="custom_embedder.py"
+import hashlib
+from collections.abc import Sequence
+
+
+class TrigramEmbedder:
+    """Embeds text as an L2-normalised bag of character trigrams."""
+
+    def __init__(self, *, dim: int = 512) -> None:
+        self._dim = dim
+
+    async def embed(self, texts: Sequence[str]) -> Sequence[tuple[float, ...]]:
+        return [self._vector(text) for text in texts]
+
+    def _vector(self, text: str) -> tuple[float, ...]:
+        counts = [0.0] * self._dim
+        lowered = f" {text.lower()} "
+        for i in range(len(lowered) - 2):
+            digest = hashlib.blake2b(lowered[i : i + 3].encode(), digest_size=8).digest()
+            counts[int.from_bytes(digest, "big") % self._dim] += 1.0
+        norm = sum(c * c for c in counts) ** 0.5
+        return tuple(c / norm for c in counts) if norm else tuple(counts)
+```
+
+Pass that one object to *both* constructors — `embedder=TrigramEmbedder()` on the pipeline and
+the same instance on the engine — and nothing else in the wiring changes. That sharing is the
+one obligation the port carries: a corpus is only searchable by the embedder that wrote it, at
+one fixed width. Real stores pin that width in a column type.
+
+Conformance is observable rather than a matter of faith, because the ports are
+`runtime_checkable`:
+
+```python
+from ragsage.ports import Embedder
+
+assert isinstance(TrigramEmbedder(), Embedder)  # True, despite never naming it
+```
+
+The whole runnable script is
+[`examples/custom_embedder.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_embedder.py).
+
+## A parser
+
+The most likely port to replace. The built-in
+[`HeuristicBackend`](/api/adapters#ragsage.parsing.HeuristicBackend) reads PDF, DOCX, PPTX,
+HTML and plain text; hand it a CSV export and it still ingests, but as one flat page of
+comma-separated soup with every citation pointing at "page 1". A parser that understands your
+format keeps the structure that makes citations worth having.
+
+```python title="custom_parser.py"
+import csv
+import hashlib
+import io
+
+from ragsage import Document, Page, ParsedDocument, RawSource
+
+
+class FaqCsvParser:
+    """Parses a two-column FAQ export into one page per question."""
+
+    def parse(self, source: RawSource) -> ParsedDocument:
+        content = source.content if source.content is not None else _read(source.path)
+        digest = hashlib.sha256(content).hexdigest()
+        document = Document(
+            id=digest[:16],
+            source=source.name,
+            content_hash=digest,
+            metadata={"format": "faq-csv"},  # yours to filter on later
+        )
+        rows = csv.DictReader(io.StringIO(content.decode("utf-8")))
+        pages = [
+            Page(number=number, text=f"{row['question']} {row['answer']}")
+            for number, row in enumerate(rows, start=1)
+        ]
+        return ParsedDocument(document=document, pages=pages)
+
+
+def _read(path: str | None) -> bytes:
+    assert path is not None  # RawSource guarantees content or path
+    with open(path, "rb") as handle:
+        return handle.read()
+```
+
+Two obligations come with this port:
+
+- **Identity must be content-derived.** The pipeline dedups on `content_hash`, so re-ingesting
+  the same bytes has to produce the same hash and the same id — sha256 of the raw content,
+  first 16 characters as the id, exactly as the built-in paths do. Get this wrong and every
+  upload is a new document.
+- **Bring a chunker too.** `HeuristicBackend` implements `parse` and `chunk` together, the
+  first stashing pages for the second. Replacing only its parser strands that hand-off, so
+  pair a standalone parser with a standalone chunker — the fakes' chunker will do while you're
+  developing.
+
+Page numbers are the engine's finest citation granularity, which is why one FAQ row maps to
+one page: it makes an answer cite the entry it actually came from. The whole runnable script is
+[`examples/custom_parser.py`](https://github.com/nirajk77777/ragsage/blob/main/examples/custom_parser.py).
+
+## A reranker
+
+The reranker is the last chance to say *this candidate is not the one*, and it is the only
+port that sees the query and the candidates together. That makes it the natural home for
+policy that has nothing to do with semantic similarity — recency, authority, or here: don't
+answer from a section the document itself marks as archived.
+
+```python title="reranker.py"
+import asyncio
+from collections.abc import Sequence
+
+from ragsage import (
+    IngestionConfig,
+    IngestionPipeline,
+    QueryEngine,
+    QueryOptions,
+    RawSource,
+    ScoredChunk,
+    Scope,
+)
+from ragsage.contextualizing import HeadingWindowContextualizer
+from ragsage.fakes import FakeEngineKit
+from ragsage.parsing import HeuristicBackend
+
+HANDBOOK = b"""# Handbook
+
+## Expenses (archived 2019)
+
+Expenses over $50 need director approval before reimbursement.
+
+## Expenses
+
+Expenses over $100 require manager approval before reimbursement.
+"""
+
+
+class FreshestSectionReranker:
+    """Demotes candidates whose heading path says the section is archived."""
+
+    def __init__(self, *, penalty: float = 0.5) -> None:
+        self._penalty = penalty
+
+    async def rerank(
+        self, query: str, candidates: Sequence[ScoredChunk], *, top_k: int
+    ) -> Sequence[ScoredChunk]:
+        adjusted = [
+            ScoredChunk(chunk=c.chunk, score=c.score - self._penalty * self._archived(c))
+            for c in candidates
+        ]
+        adjusted.sort(key=lambda candidate: candidate.score, reverse=True)
+        return adjusted[:top_k]
+
+    @staticmethod
+    def _archived(candidate: ScoredChunk) -> float:
+        # The chunker records the heading path it was found under; a real
+        # implementation might read a date from your own document metadata.
+        headings = candidate.chunk.metadata.get("headings", ())
+        return 1.0 if any("archived" in str(heading).lower() for heading in headings) else 0.0
+
+
+async def main() -> None:
+    kit = FakeEngineKit()
+    backend = HeuristicBackend()
+    scope = Scope(namespace="local")
+
+    pipeline = IngestionPipeline(
+        parser=backend,
+        classifier=kit.classifier,
+        chunker=backend,
+        contextualizer=HeadingWindowContextualizer(),
+        embedder=kit.embedder,
+        vector_store=kit.vector_store,
+        lexical_store=kit.lexical_store,
+        document_store=kit.document_store,
+        llm=kit.llm,
+        cache=kit.cache,
+    )
+    await pipeline.ingest(
+        RawSource(name="handbook.md", content=HANDBOOK),
+        scope,
+        IngestionConfig(chunk_size=200, chunk_overlap=20),
+    )
+
+    question = "When do expenses need approval?"
+    options = QueryOptions(rerank_k=1, context_k=1)  # force the choice to matter
+
+    for label, reranker in (("default", kit.reranker), ("archive-aware", FreshestSectionReranker())):
+        engine = QueryEngine(
+            embedder=kit.embedder,
+            vector_store=kit.vector_store,
+            lexical_store=kit.lexical_store,
+            reranker=reranker,
+            llm=kit.llm,
+        )
+        answer = await engine.query(question, scope, options)
+        print(f"{label:14} -> {answer.text.strip()}")
+
+
+asyncio.run(main())
+```
+
+```console
+$ python reranker.py
+default        -> Expenses over $50 need director approval before reimbursement. [1]
+archive-aware  -> Expenses over $100 require manager approval before reimbursement. [1]
+```
+
+Both passages are about expense approval, and the archived one happens to share more wording
+with the question — so similarity alone picks the answer that was superseded in 2019. The
+custom reranker knows something similarity can't: the heading says archived.
+
+Note what made that possible on the ingestion side. This pipeline uses the real
+[`HeuristicBackend`](/api/adapters#ragsage.parsing.HeuristicBackend) for both `parse` and
+`chunk`, which is what attaches the `headings` path to each chunk's metadata; the fakes'
+chunker doesn't, and the reranker would then have nothing to read.
+
+## What you don't have to write
+
+Two ports ship with a *real*, model-free implementation rather than only a fake — usable in
+production, no weights, no API key:
+
+| Class | Ports | What it does |
+|---|---|---|
+| [`HeuristicBackend`](/api/adapters#ragsage.parsing.HeuristicBackend) | parser + chunker | Reads PDF, DOCX, PPTX, HTML and text, and chunks structure-aware with a heading path. |
+| [`HeadingWindowContextualizer`](/api/adapters#ragsage.contextualizing.HeadingWindowContextualizer) | contextualizer | Contextual retrieval deterministically, from the heading window, with no LLM call per chunk. |
+
+They live in their own modules so `import ragsage` never drags a parser or a tokenizer in.
+The parser's limits are worth knowing before you trust it with a messy corpus:
+[failure modes](/failure-modes) is the honest account, symptom by symptom.
+
+## Next
+
+- [Evaluating answers](/examples/evaluation) — telling whether your adapter actually improved anything.
+- [API reference: ports](/api/ports) — all thirteen seams and their exact signatures.
