@@ -72,6 +72,7 @@ ragsage = "ragsage.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/nirajk77777/ragsage"
+Documentation = "https://ragsage-docs.nirajk.dev"
 Repository = "https://github.com/nirajk77777/ragsage"
 Issues = "https://github.com/nirajk77777/ragsage/issues"
 
