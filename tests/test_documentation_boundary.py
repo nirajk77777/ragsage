@@ -1,6 +1,6 @@
 """The documentation site stays out of the Python package, and stays one site.
 
-Four invariants, all structural, all easy to break by accident and impossible to
+Five invariants, all structural, all easy to break by accident and impossible to
 notice once broken.
 
 **The site is not part of the distribution.** ``website/`` is a Next.js
@@ -28,6 +28,14 @@ retired, and no redirects are possible from our side. A surviving link to the ol
 host therefore does not merely point somewhere stale — it points at a project that
 no longer exists, from a repository that is the canonical source of truth about
 where the documentation lives. That is worse than no link.
+
+**And the links into it name pages it has.** The repointed links are deep — they
+name ``/failure-modes`` and ``/releasing``, not the homepage, because a reader
+sent to a homepage to hunt for the page they were promised has been sent nowhere
+useful. Nothing else in the project is watching them: the site's own gate walks
+the links *inside* the built site, and these are links from outside it. So a page
+renamed in ``website/content/`` breaks the README silently, which is the failure
+this whole retirement was about, arriving by a different road.
 
 **The release notes have one home, and it is not here.** Their canonical home is
 the GitHub releases page, which is generated from the tag that publishes the
@@ -79,6 +87,12 @@ _REQUIRED_SDIST_PREFIXES = ("src/ragsage/", "tests/", "examples/")
 # while a URL anyone could click should.
 _RETIRED_HOST = "readthedocs" + ".io"
 _RETIRED_CONFIG = ".readthedocs" + ".yaml"
+
+# Where the retired links lived: the repository's front matter, its contribution
+# guide and its security policy. Named rather than counted, because a count is
+# satisfied by any fifty files in the tree — and these three are the ones a reader
+# arrives through, so they are the ones whose links cost something when they rot.
+_PUBLISHED_FRONT_MATTER = ("README.md", "CONTRIBUTING.md", "SECURITY.md")
 
 
 def _build_sdist(destination: Path) -> Path:
@@ -168,7 +182,7 @@ def test_no_reference_to_read_the_docs_survives() -> None:
     not documentation links, and they are not ours to rewrite.
     """
     offenders = []
-    searched = 0
+    scanned: dict[str, int] = {}
 
     for name in _tracked_files():
         assert _RETIRED_CONFIG not in name, f"the retired build configuration is still here: {name}"
@@ -179,16 +193,129 @@ def test_no_reference_to_read_the_docs_survives() -> None:
         except (UnicodeDecodeError, ValueError, FileNotFoundError):
             continue  # a binary file cannot carry a link a reader will follow
 
-        searched += 1
+        scanned[name] = len(text.strip())
         if _RETIRED_HOST in text.lower():
             offenders.append(name)
 
-    # Canary: a search that walked nothing finds nothing.
-    assert searched > 50, f"only {searched} files were searched; the guard is not looking"
+    # Canaries. A search that walked nothing finds nothing — and neither does one
+    # that walked the right files while they held nothing: "no retired link in
+    # README.md" is trivially true of a README.md that is zero bytes long. The
+    # named three are checked by name because the count above is satisfied by any
+    # fifty files, including fifty that are not these.
+    assert len(scanned) > 50, f"only {len(scanned)} files were searched; the guard is not looking"
+
+    unread = [name for name in _PUBLISHED_FRONT_MATTER if not scanned.get(name)]
+    assert not unread, (
+        "the files the retired links lived in were not scanned, or hold nothing to scan, so a "
+        f"link surviving in one of them would not be found: {unread}"
+    )
 
     assert not offenders, (
         "these files still point at the retired documentation site, which no longer exists "
         f"and cannot redirect: {offenders}"
+    )
+
+
+# ---------------------------------------------------------------------------- #
+# The links into the site name pages it has
+# ---------------------------------------------------------------------------- #
+
+_DOCS_SITE = "https://ragsage-docs.nirajk.dev"
+
+# The hand-authored pages, which are also the routes: the path is the URL.
+_SITE_CONTENT = _REPO_ROOT / "website/content"
+
+# Where a link ends: whitespace, or the punctuation that closes it in Markdown
+# prose and in a badge's parentheses.
+_LINK_END = re.compile(re.escape(_DOCS_SITE) + r"([^\s)\"'`,>\]]*)")
+
+# `/api/…` is the generator's, and none of it is committed — the reference is
+# written into `website/content/api/` by a build. This guard reads the repository,
+# so it can answer for prose and cannot answer for those. Resolving them when a
+# local build happens to have left them on disk would be worse than not trying:
+# the guard would be strict on the machine that just built the site and lax
+# everywhere else, including CI.
+_GENERATED_PREFIX = "/api"
+
+
+def _published_links() -> dict[str, list[str]]:
+    """Every link into the documentation site, by the route it names.
+
+    The route is normalised the way the site serves it: the fragment dropped,
+    since anchors are the site gate's business and it checks them against the
+    built pages, and the trailing slash dropped, since `/releasing/` and
+    `/releasing` are one page.
+
+    This file is scanned along with the rest, and `_DOCS_SITE` above is found in
+    it. That resolves to `/`, which is a real page — so the guard's own source
+    neither invents a failure nor hides one.
+    """
+    links: dict[str, list[str]] = {}
+    for name in _tracked_files():
+        try:
+            text = (_REPO_ROOT / name).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, ValueError, FileNotFoundError):
+            continue
+
+        for match in _LINK_END.finditer(text):
+            route = match.group(1).split("#")[0].rstrip("/") or "/"
+            links.setdefault(route, []).append(name)
+    return links
+
+
+def _prose_routes() -> set[str]:
+    """The routes the committed prose provides, under the path-is-the-URL rule."""
+    routes = set()
+    for path in _SITE_CONTENT.rglob("*"):
+        if path.suffix not in (".md", ".mdx"):
+            continue
+        relative = path.relative_to(_SITE_CONTENT)
+        if relative.parts[0] == _GENERATED_PREFIX.lstrip("/"):
+            continue
+
+        stem = relative.with_suffix("").as_posix().removesuffix("/index")
+        routes.add("/" if stem == "index" else f"/{stem}")
+    return routes
+
+
+def test_every_published_link_names_a_page_the_site_has() -> None:
+    """A link out of the repository is only as good as the page it lands on.
+
+    Checked against the content tree rather than the live site, because a test
+    that needs the network fails when someone else's machine is down, and a gate
+    that fails for reasons unrelated to the change is a gate that gets disabled.
+    The content tree is what determines the routes anyway: the path is the URL.
+
+    What this cannot see is the reference, which is generated rather than
+    committed. That boundary is stated rather than papered over — see
+    `_GENERATED_PREFIX`.
+    """
+    links = _published_links()
+    routes = _prose_routes()
+
+    # Canaries. Every claim below is over the routes the prose provides and the
+    # links that name them, so neither set may be empty — and the claim that
+    # matters is about the *deep* links, which a corpus of homepage links would
+    # satisfy while establishing nothing.
+    assert routes, f"no prose pages were found under {_SITE_CONTENT}, so nothing was resolved"
+    assert links, f"no links to {_DOCS_SITE} were found, so nothing was checked"
+
+    checkable = {
+        route: sources
+        for route, sources in links.items()
+        if not route.startswith(_GENERATED_PREFIX)
+    }
+    assert any(route != "/" for route in checkable), (
+        "every published link points at the homepage, so nothing here establishes that a deep "
+        "link lands on the page it names rather than on the front page"
+    )
+
+    dangling = {
+        route: sorted(set(sources)) for route, sources in checkable.items() if route not in routes
+    }
+    assert not dangling, (
+        "these files link to pages the site does not have, so a reader following them lands on "
+        f"a not-found: {dangling}. The routes it does have are {sorted(routes)}"
     )
 
 
@@ -267,7 +394,6 @@ def test_the_repository_still_reads_as_a_python_project() -> None:
 # ---------------------------------------------------------------------------- #
 
 _RELEASE_NOTES = _REPO_ROOT / "docs/release-notes"
-_SITE_CONTENT = _REPO_ROOT / "website/content"
 _RELEASES_PAGE = "github.com/nirajk77777/ragsage/releases"
 
 
