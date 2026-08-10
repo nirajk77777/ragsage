@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="ragsage">
+  <!-- A filled tile rather than the bare mark. At the 16px a tab strip gives it,
+       a stroked mark on transparent ground has nothing to hold it together; the
+       tile is what makes it findable among twenty other tabs.
+
+       The mark is scaled to 0.82 and its strokes thickened to 3.6 in the same
+       breath, so the drawn weight lands back on the 3 units the header mark
+       uses. Changing one without the other is what makes a favicon look thin. -->
+  <rect width="32" height="32" rx="7" fill="#47795C"/>
+  <g transform="translate(16 16) scale(0.82) translate(-16 -16)">
+    <g fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 4H8A3 3 0 0 0 5 7V25A3 3 0 0 0 8 28H13"/>
+      <path d="M19 4H24A3 3 0 0 1 27 7V25A3 3 0 0 1 24 28H19"/>
+    </g>
+    <circle cx="16" cy="16" r="3.4" fill="#ffffff"/>
+  </g>
+</svg>
